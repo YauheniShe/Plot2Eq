@@ -18,7 +18,7 @@ OPERATORS = {
 }
 
 VARIABLES = ['x']
-CONSTANT = ['pi', 'e', '1', 'C']
+CONSTANT = ['pi', 'e', 'C']
 
 
 class Constant(sp.Symbol):
@@ -30,6 +30,31 @@ class ExpressionGenerator:
         self.const_prob = const_prob
         self.leaf_prob = leaf_prob
 
+    def smart_clean(self, expr):
+        keep_tokens = {sp.E, sp.pi}
+        def transform(node):
+            if not node.is_constant():
+                return node
+            has_token = any(node.has(token) for token in keep_tokens)
+            if not has_token:
+                return node.evalf()
+            if node.is_Function:
+                return node.evalf()
+            return node
+        
+        def replace_trivial_floats(node):
+            if node.is_Float:
+                if node == 1.0:
+                    return sp.Integer(1)
+                if node == -1.0:
+                    return sp.Integer(-1)
+                if node == 0.0:
+                    return sp.Integer(0)
+            return node
+        
+        new_expr = expr.replace(lambda x: x.is_constant(), transform)
+        return new_expr.replace(lambda x: x.is_Float, replace_trivial_floats)
+    
     def generate_expr(self, depth=None):
         if depth is None:
             depth = self.max_depth
@@ -40,6 +65,7 @@ class ExpressionGenerator:
             expr = expr.simplify()
             if expr.has(sp.I) or expr.has(sp.nan) or expr.has(sp.zoo) or expr.is_constant():
                 continue
+            expr = self.smart_clean(expr)
             expr = self.round_floats(expr, 2)
             return expr
 
@@ -60,7 +86,7 @@ class ExpressionGenerator:
         if arity == 2:
             if op_name == 'IntPow':
                 first_arg = self.generate_recursive(depth - 1)
-                second_arg = sp.Integer(random.randint(-5, 5))
+                second_arg = sp.Integer(random.randint(-4, 4))
                 args = (first_arg, second_arg)
                 return symbol(*args)
             first_arg = self.generate_recursive(depth - 1)
@@ -83,29 +109,6 @@ class ExpressionGenerator:
                 return sp.pi
             if c_type == 'e':
                 return sp.E
-            else:
-                return sp.Integer(1)
         else:
             var = random.choice(VARIABLES)
             return sp.Symbol(var, real=True)
-        
-generator = ExpressionGenerator(max_depth=4, const_prob=0.1, leaf_prob=0.2) 
-
-exprs = set()
-attempts = 0
-
-while len(exprs) < 100 and attempts < 1000:
-    attempts += 1
-    expr = generator.generate_expr()
-    if expr is None:
-        continue
-    if expr.is_constant():
-        continue
-    if str(expr) in ['x', '-x'] and len(exprs) > 5:
-        continue
-    expr_str = str(expr)
-    if expr_str not in exprs:
-        exprs.add(expr_str)
-        print(f"{len(exprs)}. {expr_str}")
-
-print(f"\nВсего сгенерировано уникальных неконстантных функций: {len(exprs)}")
