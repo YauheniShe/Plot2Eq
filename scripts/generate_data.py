@@ -6,9 +6,12 @@ import logging
 import multiprocessing as mp
 import pickle
 import gzip
+import random
+import os
 
 from pathlib import Path
 from dataclasses import dataclass
+from tqdm import tqdm
 
 from src.expression import ExpressionGenerator
 from src.tokenizer import Tokenizer
@@ -61,6 +64,8 @@ def generate_points(expr, config: GenConfig):
     return np.vstack((x_values, y_values, mask.astype(float))).T
     
 def worker_task(config: GenConfig):
+    random.seed(os.getpid() + time.time())
+    np.random.seed(int(os.getpid() + time.time()) % 2**32)
     generator = ExpressionGenerator(config.max_depth, config.const_prob, config.leaf_prob)
     tokenizer = Tokenizer()
     
@@ -104,7 +109,6 @@ class DataGenerator:
 
     def save_chunk(self, data, chunk_id):
         filename = self.output_dir / f"chunk_{chunk_id}.pkl.gz"
-        print(f"Сохранение чанка {chunk_id} ({len(data)} примеров) в {filename}...")
         with gzip.open(filename, 'wb') as f:
             pickle.dump(data, f)
 
@@ -112,6 +116,8 @@ class DataGenerator:
         if n_jobs is None:
             n_jobs = mp.cpu_count()
         
+        n_jobs = max(1, n_jobs - 1)
+
         print(f"Запуск генерации на {n_jobs} процессах...")
         start = time.time()
 
@@ -121,35 +127,37 @@ class DataGenerator:
         total_generated = 0
 
         with mp.Pool(processes=n_jobs) as pool:
-            tasks = [self.config] * (size * 10)
+            tasks = [self.config] * (size * 2)
             
             result_iter = pool.imap_unordered(worker_task, tasks)
-            
-            for result in result_iter:
-                expr_str, token_seq, points = result
-                if expr_str in exprs_hashes:
-                    continue
-                exprs_hashes.add(expr_str)
-                item = {
-                    'expr_str': expr_str,
-                    'tokens': token_seq,
-                    'points': points
-                }
-                buffer.append(item)
-                total_generated += 1
+            with tqdm(total=size, desc="Генерация", unit="expr") as pbar:
+                for result in result_iter:
+                    expr_str, token_seq, points = result
+                    if expr_str in exprs_hashes:
+                        continue
+                    exprs_hashes.add(expr_str)
+                    item = {
+                        'expr_str': expr_str,
+                        'tokens': token_seq,
+                        'points': points
+                    }
+                    buffer.append(item)
+                    total_generated += 1
 
-                if len(buffer) >= chunk_size:
+                    pbar.update(1)
+
+                    if len(buffer) >= chunk_size:
+                        self.save_chunk(buffer, chunk_counter)
+                        chunk_counter += 1
+                        buffer = []
+                        tqdm.write(f"Сохранен чанк {chunk_counter-1}") 
+
+                    if total_generated >= size:
+                        pool.terminate()
+                        break
+
+                if buffer:
                     self.save_chunk(buffer, chunk_counter)
-                    chunk_counter += 1
-                    buffer = []
-                    print(f"Прогресс: {total_generated}/{size}")
-
-                if total_generated >= size:
-                    pool.terminate()
-                    break
-
-            if buffer:
-                self.save_chunk(buffer, chunk_counter)
 
         print(f"\nВсего сгенерировано: {total_generated}")
         print(f"Всего затрачено {time.time() - start:.2f} сек")
