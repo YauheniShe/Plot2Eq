@@ -13,7 +13,7 @@ class Tokenizer:
             '-1': 14, '-2': 15, '-3': 16, '2': 17, '3': 18
         }
 
-        self.id_map = ['<PAD>', 'SOS', '<EOD>',
+        self.id_map = ['<PAD>', '<SOS>', '<EOS>',
                        sp.Add, sp.Mul, sp.Pow,
                        sp.sin, sp.cos, sp.exp, sp.log, sp.sqrt, sp.Abs,
                         sp.Symbol('x'), 'CONST', -1, -2, -3, 2, 3]
