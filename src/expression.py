@@ -1,9 +1,9 @@
 import logging
+import math
 import random
 import sys
 from contextlib import contextmanager
 
-import numpy as np
 import sympy as sp
 from sympy.core.cache import clear_cache
 
@@ -40,7 +40,6 @@ UNARY_OPS = {
     "sqrt": {"symbol": sp.sqrt, "weight": 4},
     "abs": {"symbol": sp.Abs, "weight": 4},
     "tan": {"symbol": sp.tan, "weight": 4},
-    "arcsin": {"symbol": sp.asin, "weight": 2},
     "pow2": {"symbol": lambda arg: sp.Pow(arg, sp.Integer(2)), "weight": 4},
     "pow3": {"symbol": lambda arg: sp.Pow(arg, sp.Integer(3)), "weight": 2},
     "pow4": {"symbol": lambda arg: sp.Pow(arg, sp.Integer(4)), "weight": 1},
@@ -144,121 +143,76 @@ class ExpressionGenerator:
         return expr
 
     def _clean_skeleton(self, expr):
-        C_tok = sp.Symbol("C_tok", real=True)
-
-        # 1. Раскрываем скобки (оставляем как есть, это нужно для нормализации)
         try:
             expr = sp.expand(expr)
         except Exception as e:
             logging.warning(f"Ошибка при раскрытии скобок sp.expand: {e}")
 
-        # 2. Умные правила поглощения (Constant Folding)
+        c_counter = 0
+
+        def get_new_c() -> sp.Symbol:
+            nonlocal c_counter
+            c = sp.Symbol(f"C_{c_counter}", real=True)
+            c_counter += 1
+            return c
+
+        def _is_const(node):
+            return x not in getattr(node, "free_symbols", set())
+
         def _fold(node):
             if node == x:
                 return x
-            if isinstance(node, sp.Symbol) and str(node).startswith("C_"):
-                return C_tok
+
             if isinstance(node, sp.Number):
                 return node
 
-            # Рекурсивно собираем узлы снизу вверх
+            if _is_const(node):
+                return get_new_c()
+
+            if not getattr(node, "args", None):
+                return node
+
             args = [_fold(arg) for arg in node.args]
-            new_expr = node.func(*args) if args else node
-
-            # --- ОПТИМИЗАЦИЯ START ---
-            # Вместо медленного .has(x), получаем кэшированное множество свободных переменных
-            # Это работает за O(1) для уже созданных выражений
-            free_syms = getattr(new_expr, "free_symbols", set())
-
-            # Если x нет в свободных переменных - это константа
-            if x not in free_syms:
-                # Если внутри есть C_tok - сворачиваем всё в C_tok
-                if C_tok in free_syms:
-                    return C_tok
-                # Если это просто число (sp.Number или сложное числовое выражение)
-                if isinstance(new_expr, sp.Number):
-                    return new_expr
-                # Любое другое выражение без x, но с C_tok (или зависящее от других констант)
-                return C_tok
-            # --- ОПТИМИЗАЦИЯ END ---
+            new_expr = node.func(*args)
 
             if new_expr.is_Mul:
-                # --- ОПТИМИЗАЦИЯ: используем free_symbols вместо has ---
                 has_x = []
                 no_x = []
                 for a in new_expr.args:
-                    if x in getattr(a, "free_symbols", set()):
-                        has_x.append(a)
-                    else:
+                    if _is_const(a):
                         no_x.append(a)
+                    else:
+                        has_x.append(a)
 
-                # Проверяем наличие C_tok в части без x через free_symbols
-                if any(
-                    C_tok in getattr(a, "free_symbols", set()) or a == C_tok
-                    for a in no_x
-                ):
-                    return sp.Mul(C_tok, *has_x)
+                if no_x:
+                    return sp.Mul(get_new_c(), *has_x)
                 return new_expr
 
             if new_expr.is_Add:
                 has_x = []
                 no_x = []
-                # --- ОПТИМИЗАЦИЯ: используем free_symbols вместо has ---
                 for a in new_expr.args:
-                    if x in getattr(a, "free_symbols", set()):
-                        has_x.append(a)
-                    else:
+                    if _is_const(a):
                         no_x.append(a)
+                    else:
+                        has_x.append(a)
 
-                # Быстрая проверка "поглощения" констант
-                if any(
-                    C_tok in getattr(a, "free_symbols", set()) or a == C_tok
-                    for a in no_x
-                ):
-                    collapsed_no_x = C_tok
-                elif no_x:
-                    collapsed_no_x = sp.Add(*no_x)
-                else:
-                    collapsed_no_x = sp.Integer(0)
+                x_terms = set()
+                res_terms = []
 
-                x_terms = {}
+                if no_x:
+                    res_terms.append(get_new_c())
+
                 for term in has_x:
-                    # Разбор слагаемых на коэффициент и переменную часть
                     if term.is_Mul:
-                        # --- ОПТИМИЗАЦИЯ: фильтрация через free_symbols ---
-                        c_parts = [
-                            a
-                            for a in term.args
-                            if x not in getattr(a, "free_symbols", set())
-                        ]
-                        x_parts = [
-                            a
-                            for a in term.args
-                            if x in getattr(a, "free_symbols", set())
-                        ]
-
+                        x_parts = [a for a in term.args if not _is_const(a)]
                         x_key = sp.Mul(*x_parts)
-                        c_key = sp.Mul(*c_parts) if c_parts else sp.Integer(1)
                     else:
                         x_key = term
-                        c_key = sp.Integer(1)
 
-                    if x_key in x_terms:
-                        x_terms[x_key] = x_terms[x_key] + c_key
-                    else:
-                        x_terms[x_key] = c_key
-
-                res_terms = []
-                if collapsed_no_x != sp.Integer(0):
-                    res_terms.append(collapsed_no_x)
-
-                for x_key, c_val in x_terms.items():
-                    # --- ОПТИМИЗАЦИЯ: проверка коэффициента через free_symbols ---
-                    c_val_free = getattr(c_val, "free_symbols", set())
-                    if C_tok in c_val_free:
-                        res_terms.append(C_tok * x_key)
-                    else:
-                        res_terms.append(c_val * x_key)
+                    if x_key not in x_terms:
+                        x_terms.add(x_key)
+                        res_terms.append(sp.Mul(get_new_c(), x_key))
 
                 if not res_terms:
                     return sp.Integer(0)
@@ -268,28 +222,23 @@ class ExpressionGenerator:
 
             return new_expr
 
-        folded = expr
-        # Цикл while True здесь всё ещё нужен, так как фолдинг может каскадно упрощаться,
-        # но теперь каждый проход будет в разы быстрее.
-        while True:
-            new_folded = _fold(folded)
-            if new_folded == folded:
-                break
-            folded = new_folded
+        clean_expr = _fold(expr)
+
+        final_free_syms = getattr(clean_expr, "free_symbols", set())
+        used_c = sorted(
+            [s for s in final_free_syms if str(s).startswith("C_")],
+            key=lambda s: int(str(s).split("_")[1]),
+        )
 
         new_c_list = []
+        reindex_map = {}
+        for i, old_c in enumerate(used_c):
+            new_c = sp.Symbol(f"C_{i}", real=True)
+            new_c_list.append(new_c)
+            reindex_map[old_c] = new_c
 
-        def _reindex(node):
-            if node == C_tok:
-                c = sp.Symbol(f"C_{len(new_c_list)}", real=True)
-                new_c_list.append(c)
-                return c
-            if not getattr(node, "args", None):
-                return node
-            new_args = [_reindex(arg) for arg in node.args]
-            return node.func(*new_args)
+        clean_expr = clean_expr.xreplace(reindex_map)
 
-        clean_expr = _reindex(folded)
         return clean_expr, new_c_list
 
     def _generate_raw(self, fixed_n: int):
@@ -422,7 +371,7 @@ class ExpressionGenerator:
                     for c in chosen_cs:
                         val = random.uniform(-5, 5)
                         if abs(val) < 0.5:
-                            val += np.sign(val)
+                            val += math.copysign(1, val)
                         c_values[c] = val
 
                     expr_instantiated = expr_instantiated.subs(c_values)
@@ -441,3 +390,17 @@ class ExpressionGenerator:
             except Exception:
                 logging.exception("Ошибка при генерации выражения.")
                 continue
+
+
+generator = ExpressionGenerator(5, 5)
+
+
+for _ in range(100):
+    skeleton, expr, expr_instantiated = generator.generate_expr()
+    print(skeleton)
+
+    print("-----------------------------------------------------------------------")
+
+    print(expr)
+
+    print("=======================================================================")
