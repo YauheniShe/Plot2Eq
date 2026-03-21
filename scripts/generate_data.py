@@ -182,7 +182,7 @@ class DataGenerator:
         self, size: int, chunk_size: int = 5000, n_jobs: int | None = None
     ):
         if n_jobs is None:
-            n_jobs = mp.cpu_count() - 1
+            n_jobs = mp.cpu_count()
 
         existing_chunks = list(self.output_dir.glob("chunk_*.pkl.gz"))
         chunk_counter = 0
@@ -274,7 +274,7 @@ if __name__ == "__main__":
         max_y=10,
         output_dir=BASE_DIR / "data" / "train",
     )
-    train_gen.generate_data(size=10000, chunk_size=1000, n_jobs=4)
+    train_gen.generate_data(size=10**7, chunk_size=50000)
 
     val_gen = DataGenerator(
         max_ops=7,
@@ -288,4 +288,4 @@ if __name__ == "__main__":
     )
 
     print("\nГенерация валидации...")
-    val_gen.generate_data(size=0, chunk_size=100, n_jobs=8)
+    val_gen.generate_data(size=10**5, chunk_size=50000)
