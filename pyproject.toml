@@ -8,8 +8,11 @@ version = "0.1.0"
 description = "Symbolic Regression Project"
 dependencies = [
     "numpy",
+    "scipy",
+    "tqdm",
     "sympy",
     "matplotlib"
+    "torch"
 ]
 
 [tool.setuptools.packages.find]

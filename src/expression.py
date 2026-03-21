@@ -1,5 +1,4 @@
 import logging
-import math
 import random
 import sys
 from contextlib import contextmanager
@@ -369,9 +368,9 @@ class ExpressionGenerator:
                     c_values = {}
 
                     for c in chosen_cs:
-                        val = random.uniform(-5, 5)
-                        if abs(val) < 0.5:
-                            val += math.copysign(1, val)
+                        val = random.uniform(0.5, 5.0)
+                        if random.random() < 0.5:
+                            val = -val
                         c_values[c] = val
 
                     expr_instantiated = expr_instantiated.subs(c_values)
@@ -390,17 +389,3 @@ class ExpressionGenerator:
             except Exception:
                 logging.exception("Ошибка при генерации выражения.")
                 continue
-
-
-generator = ExpressionGenerator(5, 5)
-
-
-for _ in range(100):
-    skeleton, expr, expr_instantiated = generator.generate_expr()
-    print(skeleton)
-
-    print("-----------------------------------------------------------------------")
-
-    print(expr)
-
-    print("=======================================================================")

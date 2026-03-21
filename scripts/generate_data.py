@@ -14,12 +14,14 @@ import sympy as sp
 from sympy.core.cache import clear_cache
 from tqdm import tqdm
 
-from src.expression import ExpressionGenerator
+from src.expression import ExpressionGenerator, TimeoutException, time_limit
 from src.tokenizer import InvalidExpressionError, Tokenizer, TokenizerError
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-log_path = BASE_DIR / "new_data" / "data.log"
+log_path = BASE_DIR / "data" / "data.log"
+log_path.parent.mkdir(parents=True, exist_ok=True)
 logging.basicConfig(filename=log_path, level=logging.ERROR)
+
 
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 
@@ -35,34 +37,72 @@ class GenConfig:
     max_y: float
 
 
-def generate_points(expr, config: GenConfig):
+def generate_points(expr, config):
     if expr.has(sp.zoo) or expr.has(sp.oo) or expr.has(sp.nan):
         return None
-    f = sp.lambdify(sp.Symbol("x"), expr, modules="numpy")
+
+    height_y = config.max_y - config.min_y
+
+    f = sp.lambdify(sp.Symbol("x"), expr, modules=["numpy", "scipy"])
     x_values = np.linspace(num=config.steps, start=config.min_x, stop=config.max_x)
-    try:
-        y_values = f(x_values)
-        if np.isscalar(y_values) or np.ndim(y_values) == 0:
-            y_values = np.full_like(x_values, y_values)
-        if np.iscomplexobj(y_values):
+    step_size = (config.max_x - config.min_x) / (config.steps - 1)
+    noise = np.random.uniform(-0.3, 0.3, size=config.steps) * step_size
+    x_values[1:-1] += noise[1:-1]
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        try:
+            y_values = f(x_values)
+
+            if np.isscalar(y_values) or np.ndim(y_values) == 0:
+                y_values = np.full_like(x_values, y_values, dtype=float)
+
+            if np.iscomplexobj(y_values):
+                return None
+
+            y_values = np.asarray(y_values, dtype=float)
+        except Exception:
             return None
-    except Exception:
+
+    mask = (
+        np.isfinite(y_values) & (y_values <= config.max_y) & (y_values >= config.min_y)
+    )
+
+    if np.sum(mask) / config.steps <= 0.1:
         return None
-    mask = np.isfinite(y_values) & (y_values < config.max_y) & (y_values > config.min_y)
-    if np.sum(mask) / np.size(mask) <= 0.3:
+
+    valid_indices = np.where(mask)[0]
+
+    if len(valid_indices) < 2:
         return None
-    dy = np.diff(y_values)
-    diff_mask = mask[:-1] & mask[1:]
-    if np.sum(diff_mask) < 2:
+
+    consecutive_mask = np.diff(valid_indices) == 1
+    if np.sum(consecutive_mask) < 2:
         return None
-    valid_dy = dy[diff_mask]
-    mean_change = np.mean(np.abs(valid_dy))
-    if mean_change > 2:
+
+    valid_y = y_values[valid_indices]
+    valid_dy = np.diff(valid_y)[consecutive_mask]
+
+    if len(valid_dy) == 0:
         return None
+
+    mean_change_rel = np.mean(np.abs(valid_dy)) / height_y
+    if mean_change_rel > 0.05:
+        return None
+
+    max_jump_rel = np.percentile(np.abs(valid_dy), 98) / height_y
+    if max_jump_rel > 0.15:
+        return None
+
+    total_variation = np.sum(np.abs(valid_dy))
+    if total_variation > height_y * 4:
+        return None
+
     sign_changes = np.sum(np.diff(np.sign(valid_dy)) != 0)
-    if sign_changes > len(valid_dy) * 0.3:
+    if sign_changes > 20:
         return None
-    return np.vstack((x_values[mask], y_values[mask])).T
+
+    return np.column_stack((x_values[mask], y_values[mask]))
 
 
 def worker_task(args):
@@ -81,19 +121,28 @@ def worker_task(args):
             clear_cache()
         try:
             skeleton, orig_expr, expr_instantiated = generator.generate_expr()
+
             try:
                 token_seq = tokenizer.expr_to_token_seq(skeleton)
+                if len(token_seq) > 128:
+                    continue
+
             except InvalidExpressionError:
                 continue
             except TokenizerError:
                 logging.exception(f"Ошибка токенизации: {skeleton}")
                 continue
 
-            points = generate_points(expr_instantiated, config)
+            with time_limit(config.timeout):
+                points = generate_points(expr_instantiated, config)
+
             if points is None:
                 continue
 
             return str(skeleton), str(expr_instantiated), token_seq, points
+
+        except TimeoutException:
+            continue
 
         except Exception:
             continue
@@ -159,10 +208,15 @@ class DataGenerator:
         buffer = []
         total_generated = 0
 
+        skeleton_counts = {}
+        MAX_IDENTICAL_SKELETONS = 100
+
         def task_generator():
             seed_base = int.from_bytes(os.urandom(4), "little")
-            for i in range(size * 10):
+            i = 0
+            while True:
                 yield (self.config, (seed_base + i) % (2**32))
+                i += 1
 
         with mp.Pool(processes=n_jobs, maxtasksperchild=5000) as pool:
             result_iter = pool.imap_unordered(worker_task, task_generator())
@@ -170,6 +224,15 @@ class DataGenerator:
             with tqdm(total=size, desc="Генерация", unit="expr") as pbar:
                 for result in result_iter:
                     skeleton_str, instantiated_str, token_seq, points = result
+
+                    skeleton_hash = hash(skeleton_str)
+
+                    if skeleton_counts.get(skeleton_hash, 0) >= MAX_IDENTICAL_SKELETONS:
+                        continue
+                    skeleton_counts[skeleton_hash] = (
+                        skeleton_counts.get(skeleton_hash, 0) + 1
+                    )
+
                     item = {
                         "expr_str": skeleton_str,
                         "expr_instantiated_str": instantiated_str,
@@ -189,6 +252,7 @@ class DataGenerator:
 
                     if total_generated >= size:
                         pool.terminate()
+                        pool.join()
                         break
 
                 if buffer:
@@ -198,41 +262,30 @@ class DataGenerator:
         print(f"Всего затрачено {time.time() - start:.2f} сек")
 
 
-def get_raw_polish_notation(expr):
-    tokens = []
-    for node in sp.preorder_traversal(expr):
-        if node.args:
-            tokens.append(node.func.__name__)
-        else:
-            tokens.append(str(node))
-
-    return "[" + " ".join(tokens) + "]"
-
-
 if __name__ == "__main__":
     print("\nГенерация трэйна...")
     train_gen = DataGenerator(
-        max_ops=5,
+        max_ops=7,
         timeout=10,
         steps=500,
         min_x=-10,
         max_x=10,
         min_y=-10,
         max_y=10,
-        output_dir=BASE_DIR / "new_data" / "train",
+        output_dir=BASE_DIR / "data" / "train",
     )
-    train_gen.generate_data(size=10000, chunk_size=100, n_jobs=8)
+    train_gen.generate_data(size=10000, chunk_size=1000, n_jobs=4)
 
     val_gen = DataGenerator(
-        max_ops=5,
+        max_ops=7,
         timeout=10,
         steps=500,
         min_x=-10,
         max_x=10,
         min_y=-10,
         max_y=10,
-        output_dir=BASE_DIR / "new_data" / "val",
+        output_dir=BASE_DIR / "data" / "val",
     )
 
     print("\nГенерация валидации...")
-    val_gen.generate_data(size=9, chunk_size=100, n_jobs=8)
+    val_gen.generate_data(size=0, chunk_size=100, n_jobs=8)

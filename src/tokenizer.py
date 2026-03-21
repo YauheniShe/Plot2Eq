@@ -48,7 +48,6 @@ class Tokenizer:
             ("x", sp.Symbol("x", real=True)),
             ("C", sp.Symbol("C", real=True)),
             ("Add", sp.Add),
-            ("asin", sp.asin),
             ("cos", sp.cos),
             ("exp", sp.exp),
             ("log", sp.log),
@@ -81,7 +80,6 @@ class Tokenizer:
 
         self.arity_map = {
             "Add": 2,
-            "asin": 1,
             "cos": 1,
             "exp": 1,
             "log": 1,
@@ -251,10 +249,5 @@ class Tokenizer:
                 raise TokenDecodingError(
                     f"Недостаточно аргументов для оператора '{name}'. Последовательность повреждена."
                 ) from e
-
-        if len(stack) != 1:
-            raise TokenDecodingError(
-                f"Некорректная последовательность: в стеке осталось {len(stack)} элементов вместо одного."
-            )
 
         return stack[-1]
