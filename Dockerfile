@@ -16,4 +16,4 @@ RUN pip install --no-cache-dir .
 
 RUN mkdir -p /app/data
 
-CMD["python", "scripts/generate_data.py"]
+CMD ["python", "scripts/generate_data.py"]
