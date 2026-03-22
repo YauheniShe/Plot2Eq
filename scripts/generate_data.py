@@ -209,7 +209,7 @@ class DataGenerator:
         total_generated = 0
 
         skeleton_counts = {}
-        MAX_IDENTICAL_SKELETONS = 100
+        MAX_IDENTICAL_SKELETONS = 1000
 
         def task_generator():
             seed_base = int.from_bytes(os.urandom(4), "little")
