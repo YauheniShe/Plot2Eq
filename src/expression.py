@@ -341,7 +341,7 @@ class ExpressionGenerator:
 
                     if (
                         expr.has(sp.I, sp.nan, sp.zoo, sp.oo, -sp.oo)
-                        or expr.is_constant()
+                        or not expr.has(x)
                     ):
                         continue
 
