@@ -339,10 +339,7 @@ class ExpressionGenerator:
                     stage = "SIMPLIFY"
                     expr = sp.simplify(expr)
 
-                    if (
-                        expr.has(sp.I, sp.nan, sp.zoo, sp.oo, -sp.oo)
-                        or not expr.has(x)
-                    ):
+                    if expr.has(sp.I, sp.nan, sp.zoo, sp.oo, -sp.oo) or not expr.has(x):
                         continue
 
                     stage = "SKELETONIZE"
