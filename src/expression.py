@@ -33,7 +33,7 @@ x = sp.Symbol("x", real=True)
 
 UNARY_OPS = {
     "sin": {"symbol": sp.sin, "weight": 4},
-    "cos": {"symbol": sp.cos, "weight": 4},
+    # "cos": {"symbol": sp.cos, "weight": 4},
     "exp": {"symbol": sp.exp, "weight": 4},
     "ln": {"symbol": sp.log, "weight": 4},
     "sqrt": {"symbol": sp.sqrt, "weight": 4},
