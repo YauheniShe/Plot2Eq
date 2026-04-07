@@ -14,12 +14,12 @@ class TokenizerError(Exception):
 
 
 class InvalidExpressionError(TokenizerError):
-    def __init__(self, invalid_expr: sp.Expr, reason: str = "") -> None:
+    def __init__(self, invalid_expr: sp.Expr, reason: str | None = None) -> None:
         self.invalid_expr = invalid_expr
         self.reason = reason
 
         message = f"Неподдерживаемое выражение: {invalid_expr}"
-        if reason:
+        if reason is not None:
             message += f"Причина: {reason}"
 
         super().__init__(message)
@@ -32,6 +32,16 @@ class UnknownTokenError(TokenizerError):
         super().__init__(
             f"Неизвестный оператор или токен: '{token_name}' в выражении {expr}"
         )
+
+
+class CanonizationError(TokenizerError):
+    def __init__(self, expr: sp.Expr, reason: str | None = None) -> None:
+        self.expr = expr
+        message = f"Что-то пошло не так при канонизации выражения: {expr}"
+        if reason is not None:
+            message += f"Причина: {reason}"
+
+        super().__init__(message)
 
 
 class TokenDecodingError(TokenizerError):
@@ -100,7 +110,9 @@ class Tokenizer:
             return [token_id]
 
         # Константы
-        if current_expr.is_Symbol and str(current_expr).startswith("C_"):
+        if current_expr.is_Symbol and (
+            str(current_expr).startswith("C_") or str(current_expr) == "C"
+        ):
             token_id = self.token_map["C"]
             return [token_id]
 
@@ -251,3 +263,45 @@ class Tokenizer:
                 ) from e
 
         return stack[-1]
+
+    def canonicalize_tree_structure(self, expr):
+        """
+        Для того, чтобы справится с комутативностью.
+        """
+        try:
+            if not expr.args:
+                return expr
+
+            if expr.is_Add or expr.is_Mul:
+
+                def extract_operands(node, op_class):
+                    ops = []
+                    for arg in node.args:
+                        if isinstance(arg, op_class):
+                            ops.extend(extract_operands(arg, op_class))
+
+                        else:
+                            ops.append(self.canonicalize_tree_structure(arg))
+
+                    return ops
+
+                args = extract_operands(expr, expr.__class__)
+
+                args.sort(key=sp.default_sort_key)
+
+                for _ in range(len(args) - 1):
+                    first_arg = args[-1]
+                    args.pop()
+                    second_arg = args[-1]
+                    args.pop()
+                    new_arg = expr.func(second_arg, first_arg, evaluate=False)
+                    args.append(new_arg)
+
+                return args[-1]
+
+            canonical_args = [
+                self.canonicalize_tree_structure(arg) for arg in expr.args
+            ]
+            return expr.func(*canonical_args, evaluate=False)
+        except Exception:
+            raise CanonizationError(expr)
