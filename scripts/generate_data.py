@@ -15,7 +15,12 @@ from sympy.core.cache import clear_cache
 from tqdm import tqdm
 
 from src.expression import ExpressionGenerator, TimeoutException, time_limit
-from src.tokenizer import InvalidExpressionError, Tokenizer, TokenizerError
+from src.tokenizer import (
+    CanonizationError,
+    InvalidExpressionError,
+    Tokenizer,
+    TokenizerError,
+)
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 log_path = BASE_DIR / "data" / "data.log"
@@ -121,16 +126,24 @@ def worker_task(args):
             clear_cache()
         try:
             skeleton, orig_expr, expr_instantiated = generator.generate_expr()
+            canonical_skeleton = None
 
             try:
-                token_seq = tokenizer.expr_to_token_seq(skeleton)
+                canonical_skeleton = tokenizer.canonicalize_tree_structure(skeleton)
+
+                token_seq = tokenizer.expr_to_token_seq(canonical_skeleton)
                 if len(token_seq) > 128:
                     continue
 
             except InvalidExpressionError:
                 continue
-            except TokenizerError:
+
+            except CanonizationError:
                 logging.exception(f"Ошибка токенизации: {skeleton}")
+                raise
+
+            except TokenizerError:
+                logging.exception(f"Ошибка токенизации: {canonical_skeleton}")
                 continue
 
             with time_limit(config.timeout):
@@ -139,7 +152,7 @@ def worker_task(args):
             if points is None:
                 continue
 
-            return str(skeleton), str(expr_instantiated), token_seq, points
+            return str(canonical_skeleton), str(expr_instantiated), token_seq, points
 
         except TimeoutException:
             continue
@@ -209,7 +222,7 @@ class DataGenerator:
         total_generated = 0
 
         skeleton_counts = {}
-        MAX_IDENTICAL_SKELETONS = 1000
+        MAX_IDENTICAL_SKELETONS = 500
 
         def task_generator():
             seed_base = int.from_bytes(os.urandom(4), "little")
@@ -225,7 +238,7 @@ class DataGenerator:
                 for result in result_iter:
                     skeleton_str, instantiated_str, token_seq, points = result
 
-                    skeleton_hash = hash(skeleton_str)
+                    skeleton_hash = hash(tuple(token_seq.tolist()))
 
                     if skeleton_counts.get(skeleton_hash, 0) >= MAX_IDENTICAL_SKELETONS:
                         continue
@@ -274,7 +287,7 @@ if __name__ == "__main__":
         max_y=10,
         output_dir=BASE_DIR / "data" / "train",
     )
-    train_gen.generate_data(size=10**7, chunk_size=50000)
+    train_gen.generate_data(size=50000, chunk_size=50000, n_jobs=1)
 
     val_gen = DataGenerator(
         max_ops=7,
@@ -288,4 +301,4 @@ if __name__ == "__main__":
     )
 
     print("\nГенерация валидации...")
-    val_gen.generate_data(size=10**5, chunk_size=50000)
+    val_gen.generate_data(size=0, chunk_size=50000, n_jobs=1)
