@@ -346,6 +346,10 @@ class ExpressionGenerator:
                     c_list = []
                     raw_skeleton = self._skeletonize(expr, c_list)
 
+                    extra_c = sp.Symbol(f"C_{len(c_list)}", real=True)
+                    c_list.append(extra_c)
+                    raw_skeleton = sp.Add(raw_skeleton, extra_c, evaluate=False)
+
                     stage = "CLEAN_SKELETON"
                     skeleton, c_list = self._clean_skeleton(raw_skeleton)
 
