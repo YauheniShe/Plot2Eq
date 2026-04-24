@@ -3,6 +3,7 @@ import typing as tp
 import numpy as np
 import numpy.typing as npt
 import sympy as sp
+from torch import is_tensor
 
 x = sp.Symbol("x", real=True)
 
@@ -220,7 +221,11 @@ class Tokenizer:
     def token_seq_to_expr(self, tokens: npt.NDArray) -> sp.Expr:
         stack = []
 
-        for id in tokens[::-1]:
+        tokens_list = list(tokens)
+        for id in tokens_list[::-1]:
+            if is_tensor(id):
+                id = int(id.item())
+
             if id == 0 or id == 1 or id == 2:
                 continue
 
@@ -234,13 +239,13 @@ class Tokenizer:
                 stack.append(token)
                 continue
 
-            arity = self.arity_map[token.__name__]
+            arity = self.arity_map[token.__name__]  # type: ignore
 
             try:
                 if arity == 1:
                     arg = stack[-1]
                     stack.pop()
-                    token = token(arg, evaluate=False)
+                    token = token(arg, evaluate=False)  # type: ignore
                     stack.append(token)
                     continue
                 elif arity == 2:
@@ -249,7 +254,7 @@ class Tokenizer:
                     second_arg = stack[-1]
                     stack.pop()
                     args = (first_arg, second_arg)
-                    token = token(*args, evaluate=False)
+                    token = token(*args, evaluate=False)  # type: ignore
                     stack.append(token)
                     continue
                 else:
