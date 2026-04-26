@@ -161,7 +161,7 @@ class SymbolicDataset(Dataset):
         for f in tqdm(self.file_names):
             file_path = self.data_dir / f
             data = torch.load(
-                file_path, map_location=self.map_location, weights_only=False
+                file_path, map_location=self.map_location, weights_only=True
             )
             self.points.append(data["points"])
             self.tokens.append(data["tokens"])
