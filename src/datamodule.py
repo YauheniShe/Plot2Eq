@@ -26,7 +26,9 @@ def build_dataloaders(
 ):
 
     print("Loading base dataset...")
-    base_dataset = SymbolicDataset(data_dir, drawn_augmentation=False)
+    base_dataset = SymbolicDataset(
+        data_dir, drawn_augmentation=False, map_location="cpu"
+    )
 
     dataset_size = len(base_dataset)
     val_size = int(val_split * dataset_size)
