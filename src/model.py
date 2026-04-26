@@ -376,3 +376,99 @@ class Plot2EqModel(nn.Module):
                 break
 
         return tokens
+
+    def beam_search(self, src, sos_idx, eos_idx, max_len=128, beam_size=5):
+
+        self.eval()
+        B = src.size(0)
+        device = src.device
+
+        features = self.cnn_encoder(src)
+        memory = features.transpose(1, 2)
+        memory = self.encoder_pe(memory)
+        for layer in self.encoder_layers:
+            memory = layer(memory)
+        memory = self.enc_norm(memory)
+
+        memory = memory.repeat_interleave(beam_size, dim=0)
+        tokens = torch.full(
+            (B * beam_size, 1), sos_idx, dtype=torch.long, device=device
+        )
+        scores = torch.full((B, beam_size), -float("inf"), device=device)
+        scores[:, 0] = 0.0
+        scores = scores.view(-1)
+
+        is_finished = torch.zeros(B * beam_size, dtype=torch.bool, device=device)
+
+        kv_caches = [None] * len(self.decoder_layers)
+        head_dim = self.d_model // self.decoder_layers[0].self_attn.nhead  # type: ignore
+
+        for pos in range(max_len):
+            curr_token = tokens[:, -1:]
+
+            tgt_embedded = self.target_emb(curr_token) * math.sqrt(self.d_model)
+            fc = self.freqs_cos[pos : pos + 1].view(1, 1, 1, head_dim // 2)  # type: ignore
+            fs = self.freqs_sin[pos : pos + 1].view(1, 1, 1, head_dim // 2)  # type: ignore
+
+            new_caches = []
+            for i, layer in enumerate(self.decoder_layers):
+                tgt_embedded, new_layer_cache = layer(
+                    x=tgt_embedded,
+                    memory=memory,
+                    freqs_cos=fc,
+                    freqs_sin=fs,
+                    kv_cache=kv_caches[i],
+                )
+                new_caches.append(new_layer_cache)
+
+            kv_caches = new_caches
+
+            tgt_embedded = self.dec_norm(tgt_embedded)
+            logits = self.fc_out(tgt_embedded).squeeze(
+                1
+            )  # (B * beam_width, vocab_size)
+            vocab_size = logits.size(-1)
+
+            log_probs = F.log_softmax(logits, dim=-1)
+
+            log_probs[is_finished] = -float("inf")
+            log_probs[is_finished, eos_idx] = 0.0
+
+            next_scores = (
+                scores.unsqueeze(-1) + log_probs
+            )  # (B * beam_width, vocab_size)
+            next_scores = next_scores.view(B, -1)  # (B, beam_width * vocab_size)
+
+            topk_scores, topk_indices = torch.topk(next_scores, beam_size, dim=-1)
+
+            beam_indices = topk_indices // vocab_size
+            token_indices = topk_indices % vocab_size
+
+            batch_offsets = torch.arange(B, device=device).unsqueeze(1) * beam_size
+            global_beam_indices = (batch_offsets + beam_indices).view(-1)
+
+            tokens = torch.cat(
+                [tokens[global_beam_indices], token_indices.view(-1, 1)], dim=1
+            )
+            scores = topk_scores.view(-1)
+            is_finished = is_finished[global_beam_indices] | (
+                token_indices.view(-1) == eos_idx
+            )
+
+            reordered_caches = []
+            for sa_cache, ca_cache in kv_caches:
+                sa_k, sa_v = sa_cache
+                sa_k, sa_v = sa_k[global_beam_indices], sa_v[global_beam_indices]
+
+                ca_k, ca_v = ca_cache
+                ca_k, ca_v = ca_k[global_beam_indices], ca_v[global_beam_indices]
+
+                reordered_caches.append(((sa_k, sa_v), (ca_k, ca_v)))
+
+            kv_caches = reordered_caches
+
+            if is_finished.all():
+                break
+
+        all_candidates = tokens.reshape(B, beam_size, -1)
+        return all_candidates
