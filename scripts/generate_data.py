@@ -32,6 +32,7 @@ class GenConfig:
     max_x: float
     min_y: float
     max_y: float
+    timeout: int
 
 def generate_points(expr, config: GenConfig):
     if expr.has(sp.zoo) or expr.has(sp.oo) or expr.has(sp.nan):
@@ -66,7 +67,7 @@ def generate_points(expr, config: GenConfig):
 def worker_task(config: GenConfig):
     random.seed(os.getpid() + time.time())
     np.random.seed(int(os.getpid() + time.time()) % 2**32)
-    generator = ExpressionGenerator(config.max_depth, config.const_prob, config.leaf_prob)
+    generator = ExpressionGenerator(config.max_depth, config.const_prob, config.leaf_prob, config.timeout)
     tokenizer = Tokenizer()
     
     while True:
@@ -91,7 +92,7 @@ def worker_task(config: GenConfig):
 
 class DataGenerator:
     def __init__(self, max_depth: int, steps: int, const_prob: float, leaf_prob: float,
-                 min_x: float, max_x: float, min_y: float, max_y: float, output_dir: str | Path) -> None:
+                 min_x: float, max_x: float, min_y: float, max_y: float, timeout: int, output_dir: str | Path) -> None:
         self.config = GenConfig(
             max_depth=max_depth,
             steps=steps,
@@ -100,11 +101,12 @@ class DataGenerator:
             min_x=min_x,
             max_x=max_x,
             min_y=min_y,
-            max_y=max_y
+            max_y=max_y,
+            timeout=timeout
         )
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        self.generator = ExpressionGenerator(max_depth, const_prob, leaf_prob)
+        self.generator = ExpressionGenerator(max_depth, const_prob, leaf_prob, timeout)
         self.tokenizer = Tokenizer()
 
     def save_chunk(self, data, chunk_id):
@@ -114,15 +116,28 @@ class DataGenerator:
 
     def generate_data(self, size: int, chunk_size: int = 5000, n_jobs: int | None = None):
         if n_jobs is None:
-            n_jobs = mp.cpu_count()
-        
-        n_jobs = max(1, n_jobs - 1)
+            n_jobs = mp.cpu_count() - 1
+
+        existing_chunks = list(self.output_dir.glob("chunk_*.pkl.gz"))
+        chunk_counter = 0
+        if existing_chunks:
+            max_id = -1
+            for f in existing_chunks:
+                try:
+                    part = f.name.split('_')[1]
+                    num = int(part.split('.')[0])
+                    if num > max_id:
+                        max_id = num
+                except (IndexError, ValueError):
+                    continue
+            
+            chunk_counter = max_id + 1
+            print(f"Найдено {len(existing_chunks)} существующих файлов. Следующий чанк будет: {chunk_counter}")
 
         print(f"Запуск генерации на {n_jobs} процессах...")
         start = time.time()
 
         buffer = []
-        chunk_counter = 0
         exprs_hashes = set()
         total_generated = 0
 
@@ -176,25 +191,27 @@ def get_raw_polish_notation(expr):
 if __name__ == '__main__':
     print("\nГенерация трэйна...")
     train_gen = DataGenerator(
-        max_depth=6,
+        max_depth=4,
         steps=500,
         const_prob=0.1, 
         leaf_prob=0.2,
         min_x=-10, max_x=10, 
         min_y=-10, max_y=10,
+        timeout=10,
         output_dir= BASE_DIR / "data" / "train"
     )
-    train_gen.generate_data(size=1000000, chunk_size=5000)
+    train_gen.generate_data(size=1000000, chunk_size=5000, n_jobs=4)
 
     val_gen = DataGenerator(
-        max_depth=6, 
+        max_depth=4, 
         steps=500, 
         const_prob=0.1, 
         leaf_prob=0.2,
         min_x=-10, max_x=10, 
         min_y=-10, max_y=10,
+        timeout=10,
         output_dir= BASE_DIR / "data" / "val"
     )
     
     print("\nГенерация валидации...")
-    val_gen.generate_data(size=50000, chunk_size=5000)
+    val_gen.generate_data(size=50000, chunk_size=5000, n_jobs=4)

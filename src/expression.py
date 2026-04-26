@@ -1,5 +1,23 @@
 import sympy as sp
 import random
+import signal
+import logging
+
+from contextlib import contextmanager
+
+class TimeoutException(Exception): 
+    pass
+
+@contextmanager
+def time_limit(seconds):
+    def signal_handler(signum, frame):
+        raise TimeoutException("Timed out!")
+    signal.signal(signal.SIGALRM, signal_handler)
+    signal.alarm(seconds)
+    try:
+        yield
+    finally:
+        signal.alarm(0)
 
 OPERATORS = {
     'Add': {'symbol': sp.Add, 'arity': 2, 'weight': 5.0},
@@ -21,15 +39,12 @@ OPERATORS = {
 VARIABLES = ['x']
 CONSTANT = ['C']
 
-
-class Constant(sp.Symbol):
-    pass
-
 class ExpressionGenerator:
-    def __init__(self, max_depth: int, const_prob: float, leaf_prob: float) -> None:
+    def __init__(self, max_depth: int, const_prob: float, leaf_prob: float, timeout: int) -> None:
         self.max_depth  = max_depth
         self.const_prob = const_prob
         self.leaf_prob = leaf_prob
+        self.timeout = timeout 
 
     def _smart_clean(self, expr):
         expr = expr.evalf()
@@ -50,15 +65,34 @@ class ExpressionGenerator:
         if depth is None:
             depth = self.max_depth
         while True:
-            expr = self._generate_recursive()
-            if expr is None:
+            stage = 'INIT'
+            expr = None
+            try:
+                with time_limit(self.timeout):
+                    stage = 'GENERATE'
+                    expr = self._generate_recursive(depth)
+                    if expr is None:
+                        continue
+                    stage = 'SIMPLIFY'
+                    expr = expr.simplify()
+                    if expr.has(sp.I) or expr.has(sp.nan) or expr.has(sp.zoo) or expr.is_constant():
+                        continue
+                    stage = 'CLEAN'
+                    expr = self._smart_clean(expr)
+                    stage = 'ROUND'
+                    expr = self._round_floats(expr)
+                    return expr
+            except TimeoutException:
+                try:
+                    bad_expr = str(expr) if expr is not None else 'None'
+                except:
+                    bad_expr = 'Неизвестное выражение (стадия генерации)'
+                logging.error(f"Timeout[{stage}] {self.timeout} секунд. Пропущено выражение: {bad_expr}")
                 continue
-            expr = expr.simplify()
-            if expr.has(sp.I) or expr.has(sp.nan) or expr.has(sp.zoo) or expr.is_constant():
+
+            except Exception as e:
+                logging.exception("Ошибка при генерации выражения.")
                 continue
-            expr = self._smart_clean(expr)
-            expr = self._round_floats(expr)
-            return expr
 
     def _generate_recursive(self, depth=None):
         if depth is None:
