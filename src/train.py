@@ -11,9 +11,9 @@ import wandb
 from torch.amp.autocast_mode import autocast
 from tqdm.auto import tqdm
 
-from src.datamodule import build_dataloaders
-from src.model import Plot2EqModel
-from src.tokenizer import Tokenizer
+from .datamodule import build_dataloaders
+from .model import Plot2EqModel
+from .tokenizer import Tokenizer
 
 
 @dataclass
