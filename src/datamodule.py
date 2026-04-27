@@ -1,5 +1,11 @@
 import torch
-from torch.utils.data import DataLoader, Dataset, TensorDataset, random_split
+from torch.utils.data import (
+    DataLoader,
+    Dataset,
+    TensorDataset,
+    WeightedRandomSampler,
+    random_split,
+)
 from tqdm.auto import tqdm
 
 from .dataset import HandDrawnAugmentation, SymbolicDataset
@@ -41,6 +47,17 @@ def build_dataloaders(
         generator=generator,  # type: ignore
     )
 
+    token_lengths = (
+        base_dataset.tokens != base_dataset.tokenizer.token_map["<pad>"]
+    ).sum(axis=1)  # type: ignore
+
+    train_token_lengths = token_lengths[train_indices.indices]
+    weights = 1.0 / (train_token_lengths.float() + 1.0) ** 2
+
+    sampler = WeightedRandomSampler(
+        weights, num_samples=len(train_indices), replacement=True
+    )
+
     train_transform = HandDrawnAugmentation(p=0.8)
     train_dataset = AugmentedSubset(
         base_dataset, train_indices, transform=train_transform
@@ -66,7 +83,8 @@ def build_dataloaders(
     train_loader = DataLoader(
         train_dataset,
         batch_size=batch_size,
-        shuffle=True,
+        shuffle=False,
+        sampler=sampler,
         num_workers=4,
         pin_memory=True,
     )
