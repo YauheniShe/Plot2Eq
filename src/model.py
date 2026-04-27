@@ -5,6 +5,18 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
+class RMSNorm(nn.Module):
+    def __init__(self, dims: int, eps: float = 1e-6):
+        super().__init__()
+        self.eps = eps
+        self.weight = nn.Parameter(torch.ones(dims))
+
+    def forward(self, x):
+        variance = x.to(torch.float32).pow(2).mean(-1, keepdim=True)
+        x = x * torch.rsqrt(variance + self.eps)
+        return self.weight * x.to(x.dtype)
+
+
 class SwiGLU(nn.Module):
     def __init__(self, in_features, hidden_features, out_features, dropout=0.1):
         super().__init__()
@@ -38,8 +50,8 @@ def apply_rotary_emb(xq, xk, freqs_cos, freqs_sin):
     xq_r, xq_i = xq[..., 0], xq[..., 1]
     xk_r, xk_i = xk[..., 0], xk[..., 1]
 
-    fc = freqs_cos.to(xq.device)
-    fs = freqs_sin.to(xq.device)
+    fc = freqs_cos.to(device=xq.device, dtype=xq.dtype)
+    fs = freqs_sin.to(device=xq.device, dtype=xq.dtype)
 
     xq_out_r = xq_r * fc - xq_i * fs
     xq_out_i = xq_r * fs + xq_i * fc
@@ -133,8 +145,8 @@ class EncoderLayer(nn.Module):
     def __init__(self, d_model, nhead, dim_feedforward, dropout=0.1):
         super().__init__()
         self.self_attn = Attention(d_model, nhead, dropout=dropout)
-        self.norm1 = nn.RMSNorm(d_model)
-        self.norm2 = nn.RMSNorm(d_model)
+        self.norm1 = RMSNorm(d_model)
+        self.norm2 = RMSNorm(d_model)
         self.ff = SwiGLU(d_model, dim_feedforward, d_model, dropout=dropout)
         self.dropout = nn.Dropout(dropout)
 
@@ -150,9 +162,9 @@ class DecoderLayer(nn.Module):
         super().__init__()
         self.self_attn = Attention(d_model, nhead, dropout=dropout)
         self.cross_attn = Attention(d_model, nhead, dropout=dropout)
-        self.norm1 = nn.RMSNorm(d_model)
-        self.norm2 = nn.RMSNorm(d_model)
-        self.norm3 = nn.RMSNorm(d_model)
+        self.norm1 = RMSNorm(d_model)
+        self.norm2 = RMSNorm(d_model)
+        self.norm3 = RMSNorm(d_model)
         self.ff = SwiGLU(d_model, dim_feedforward, d_model, dropout=dropout)
         self.dropout = nn.Dropout(dropout)
 
@@ -182,7 +194,7 @@ class ConvNeXt1DBlock(nn.Module):
         super().__init__()
         self.dwconv = nn.Conv1d(dim, dim, kernel_size=7, padding=3, groups=dim)
         self.net = nn.Sequential(
-            nn.RMSNorm(dim),
+            RMSNorm(dim),
             nn.Linear(dim, 4 * dim),
             nn.GELU(),
             nn.Linear(4 * dim, dim),
@@ -273,7 +285,7 @@ class Plot2EqModel(nn.Module):
                 for _ in range(num_enc_layers)
             ]
         )
-        self.enc_norm = nn.RMSNorm(d_model)
+        self.enc_norm = RMSNorm(d_model)
 
         self.target_emb = nn.Embedding(vocab_size, d_model, padding_idx=pad_idx)
         self.emb_dropout = nn.Dropout(dropout)
@@ -286,7 +298,7 @@ class Plot2EqModel(nn.Module):
                 for _ in range(num_dec_layers)
             ]
         )
-        self.dec_norm = nn.RMSNorm(d_model)
+        self.dec_norm = RMSNorm(d_model)
 
         self.fc_out = nn.Linear(d_model, vocab_size, bias=False)
         self.fc_out.weight = self.target_emb.weight
