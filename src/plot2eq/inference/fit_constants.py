@@ -60,6 +60,9 @@ def fit_constants(points_tensor, expr, bounds_range=(-10.0, 10.0), max_iter=200)
     parameterized_expr, params = assign_unique_constants(expr)
     x_sym = sp.Symbol("x", real=True)
 
+    if points_tensor.dim() == 3:
+        points_tensor = points_tensor.squeeze(0)
+
     y_vals = points_tensor[0].cpu().numpy()
     mask = points_tensor[1].cpu().numpy().astype(bool)
     x_vals = np.linspace(0, 1, len(y_vals))
@@ -105,8 +108,6 @@ def fit_constants(points_tensor, expr, bounds_range=(-10.0, 10.0), max_iter=200)
             recombination=0.7,
             tol=1e-5,
             polish=True,
-            updating="deferred",
-            workers=-1,
         )
 
         if not result.success and result.fun >= 1e8:
