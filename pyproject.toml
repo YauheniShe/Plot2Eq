@@ -11,7 +11,8 @@ dependencies = [
     "scipy",
     "tqdm",
     "sympy",
-    "matplotlib"
+    "matplotlib",
+    "torch"
 ]
 
 [tool.setuptools.packages.find]
