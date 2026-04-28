@@ -2,9 +2,6 @@ import math
 from dataclasses import asdict
 from pathlib import Path
 
-import matplotlib.pyplot as plt
-import numpy as np
-import sympy as sp
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -15,8 +12,8 @@ from tqdm.auto import tqdm
 from plot2eq.config import TrainConfig
 from plot2eq.core.tokenizer import Tokenizer
 from plot2eq.data.datamodule import build_dataloaders
-from plot2eq.inference.pipeline import predict_best_equation
-from plot2eq.models.model import Plot2EqModel
+from plot2eq.models.core_model import Plot2EqModel
+from plot2eq.training.logging_utils import create_val_predictions_table
 
 
 def get_lr_scheduler(optimizer, warmup_steps, total_steps):
@@ -29,76 +26,6 @@ def get_lr_scheduler(optimizer, warmup_steps, total_steps):
         return 0.5 * (1.0 + math.cos(math.pi * progress))
 
     return optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
-
-
-@torch.no_grad()
-def create_val_predictions_table(model, points, true_tokens, tokenizer, num_examples=5):
-
-    num_examples = min(num_examples, points.size(0))
-    sample_points = points[:num_examples]
-    sample_true_tokens = true_tokens[:num_examples]
-
-    val_table = wandb.Table(
-        columns=["Plot", "True Equation", "Predicted Equation", "MSE", "Score"]
-    )
-
-    for i in range(num_examples):
-        y_vals = sample_points[i, 0].cpu().numpy()
-        mask = sample_points[i, 1].cpu().numpy()
-        x_vals = [j / len(y_vals) for j in range(len(y_vals))]
-
-        res = predict_best_equation(
-            model, sample_points[i : i + 1], tokenizer, beam_size=5, length_penalty=0.01
-        )
-
-        pred_expr = res["best_expr"]
-        mse = res["mse"]
-        score = res["score"]
-
-        fig, ax = plt.subplots(figsize=(5, 4))
-
-        ax.plot(x_vals[mask], y_vals[mask], color="black", linewidth=3, label="Target")
-        pred_str = "Parse Error / Fit Failed"
-
-        if pred_expr is not None:
-            pred_str = f"${sp.latex(pred_expr)}$"
-
-            x_sym = sp.Symbol("x", real=True)
-            f_expr = sp.lambdify(x_sym, pred_expr, modules=["numpy"])
-            try:
-                preds_y = f_expr(x_vals[mask])
-                if np.isscalar(preds_y):
-                    preds_y = np.full_like(x_vals[mask], preds_y)
-                ax.plot(
-                    x_vals[mask],
-                    preds_y,
-                    color="red",
-                    linestyle="--",
-                    linewidth=2.5,
-                    label="Predicted",
-                )
-            except Exception:
-                pass
-
-        ax.set_ylim(-0.05, 1.05)
-        ax.legend()
-        plt.tight_layout()
-
-        true_toks = [
-            t.item() for t in sample_true_tokens[i] if t.item() not in (0, 1, 2)
-        ]
-        try:
-            true_expr = tokenizer.token_seq_to_expr(torch.tensor(true_toks))
-            true_str = f"${sp.latex(true_expr)}$"
-        except Exception:
-            true_str = "Parse Error"
-
-        val_table.add_data(
-            wandb.Image(fig), true_str, pred_str, f"{mse:.5f}", f"{score:.5f}"
-        )
-        plt.close(fig)
-
-    return val_table
 
 
 def train_loop(cfg: TrainConfig):
@@ -167,8 +94,8 @@ def train_loop(cfg: TrainConfig):
         raw_model = model._orig_mod if hasattr(model, "_orig_mod") else model
         raw_model.load_state_dict(checkpoint["model_state_dict"])  # type: ignore
 
-        optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
-        scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
+        # optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+        # scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
 
         start_epoch = checkpoint["epoch"] + 1
         best_val_loss = checkpoint["best_val_loss"]
@@ -182,6 +109,7 @@ def train_loop(cfg: TrainConfig):
     for epoch in range(start_epoch, cfg.epochs + 1):
         model.train()
         train_loss = 0.0
+        total_train_samples = 0
         pbar = tqdm(train_loader, desc=f"Epoch {epoch}/{cfg.epochs} [Train]")
 
         for batch_idx, (points, tokens) in enumerate(pbar):
@@ -203,7 +131,10 @@ def train_loop(cfg: TrainConfig):
             optimizer.step()
             scheduler.step()
 
-            train_loss += loss.item()
+            batch_size = points.size(0)
+            train_loss += loss.item() * batch_size
+            total_train_samples += batch_size
+
             pbar.set_postfix(
                 {
                     "loss": f"{loss.item():.4f}",
@@ -211,10 +142,11 @@ def train_loop(cfg: TrainConfig):
                 }
             )
 
-        avg_train_loss = train_loss / len(train_loader)
+        avg_train_loss = train_loss / total_train_samples
 
         model.eval()
         val_loss = 0.0
+        total_val_samples = 0
         correct_tokens = 0
         total_tokens = 0
 
@@ -252,7 +184,9 @@ def train_loop(cfg: TrainConfig):
 
                     loss = criterion(logits_flat, tgt_expected_flat)
 
-                val_loss += loss.item()
+                batch_size = points.size(0)
+                val_loss += loss.item() * batch_size
+                total_val_samples += batch_size
 
                 preds_flat = preds_seq.view(-1)
                 mask_flat = tgt_expected_flat != pad_idx
@@ -269,7 +203,7 @@ def train_loop(cfg: TrainConfig):
                         tokenizer=tokenizer,
                     )
 
-        avg_val_loss = val_loss / len(val_loader)
+        avg_val_loss = val_loss / total_val_samples
         val_tok_acc = correct_tokens / total_tokens
         val_seq_acc = correct_sequences / total_sequences
 
