@@ -8,6 +8,8 @@ def predict_best_equation(
 ):
 
     model.eval()
+
+    pad_idx = tokenizer.token_map["<pad>"]
     sos_idx = tokenizer.token_map["<sos>"]
     eos_idx = tokenizer.token_map["<eos>"]
 
@@ -23,11 +25,9 @@ def predict_best_equation(
 
     for i in range(beam_size):
         tokens = candidates[i]
-        seq_length = (
-            (~torch.isin(tokens, torch.tensor([0, 1, 2], device=tokens.device)))
-            .sum()
-            .item()
-        )
+        special_tokens = torch.tensor([pad_idx, sos_idx, eos_idx], device=tokens.device)
+
+        seq_length = (~torch.isin(tokens, special_tokens)).sum().item()
         try:
             expr = tokenizer.token_seq_to_expr(tokens)
             expr_str = str(expr)
