@@ -14,8 +14,8 @@ import sympy as sp
 from sympy.core.cache import clear_cache
 from tqdm import tqdm
 
-from src.core.expression import ExpressionGenerator, TimeoutException, time_limit
-from src.core.tokenizer import (
+from plot2eq.core.expression import ExpressionGenerator, TimeoutException, time_limit
+from plot2eq.core.tokenizer import (
     CanonizationError,
     InvalidExpressionError,
     Tokenizer,
