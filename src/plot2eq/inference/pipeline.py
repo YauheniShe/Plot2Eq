@@ -12,6 +12,9 @@ def predict_top_k_equations(
     beam_size=5,
     top_k=1,
     length_penalty=0.01,
+    fast_mode=False,
+    opt_max_iter=200,
+    opt_popsize=15,
 ):
     model.eval()
 
@@ -39,7 +42,14 @@ def predict_top_k_equations(
 
             seen_exprs.add(expr_str)
 
-            final_expr, popt, mse = fit_constants(expr, x_data, y_data)
+            final_expr, popt, mse = fit_constants(
+                expr,
+                x_data,
+                y_data,
+                max_iter=opt_max_iter,
+                popsize=opt_popsize,
+                fast_mode=fast_mode,
+            )
 
             if mse == float("inf"):
                 continue

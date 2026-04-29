@@ -55,7 +55,15 @@ def calculate_robust_mse(preds, y_data):
     return mse + penalty
 
 
-def fit_constants(expr, x_data, y_data, bounds_range=(-10.0, 10.0), max_iter=200):
+def fit_constants(
+    expr,
+    x_data,
+    y_data,
+    bounds_range=(-10.0, 10.0),
+    max_iter=200,
+    popsize=15,
+    fast_mode=False,
+):
     """
     Принимает sympy выражение и сырые массивы (без NaN и масок).
     Возвращает формулу с подобранными константами, сами константы и MSE.
@@ -90,17 +98,26 @@ def fit_constants(expr, x_data, y_data, bounds_range=(-10.0, 10.0), max_iter=200
 
     bounds = [bounds_range for _ in params]
 
+    if fast_mode:
+        max_iter = min(max_iter, 50)
+        popsize = min(popsize, 5)
+        polish = False
+        tol = 1e-3
+    else:
+        polish = True
+        tol = 1e-5
+
     try:
         result = differential_evolution(
             objective_func,
             bounds=bounds,  # type: ignore
             strategy="best1bin",
             maxiter=max_iter,
-            popsize=15,
+            popsize=popsize,
             mutation=(0.5, 1.0),
             recombination=0.7,
-            tol=1e-5,
-            polish=True,
+            tol=tol,
+            polish=polish,
         )
 
         if not result.success and result.fun >= 1e8:
