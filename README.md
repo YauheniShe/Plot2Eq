@@ -40,18 +40,17 @@ To solve this, the project uses a highly effective **Two-Stage Pipeline**:
    * **Decoder:** A modern Transformer Decoder featuring `RMSNorm`, `SwiGLU` activations, and Rotary Positional Embeddings (`RoPE`).
    * *Example Output:* `C * log(C * x + C) + C`
 
-2. **⚙️ Mathematical Optimization & Candidate Ranking:**
-   A global optimization algorithm (`scipy.optimize.differential_evolution`) fits the constants to the user's drawn points. To handle asymptotes robustly and penalize overly complex expressions (Occam's razor), the candidates from Beam Search are ranked using a custom scoring function:
+2. **⚙️ Mathematical Optimization & Candidate Ranking:** A global optimization algorithm (`scipy.optimize.differential_evolution`) fits the constants to the user's drawn points. To handle asymptotes robustly and penalize overly complex expressions (Occam's razor), the candidates from Beam Search are ranked using a custom scoring function:
 
-   $$
-    \text{Robust MSE} = \frac{1}{N_{valid}} \sum (\hat{y}_i - y_i)^2 + \lambda \left( \frac{N_{total} - N_{valid}}{N_{total}} \right)
-   $$
-   
-   $$
-   \text{Final Score} =  \frac{100}{\text{Robust MSE} + \alpha \cdot L_{seq} + 1}
-   $$
+$$
+\text{Robust MSE} = \frac{1}{N_{valid}} \sum (\hat{y}_i - y_i)^2 + \lambda \left( \frac{N_{total} - N_{valid}}{N_{total}} \right)
+$$
 
-   *(where $\lambda$ is a penalty for undefined regions/NaNs, and $\alpha$ is a length penalty for the sequence of tokens).*
+$$
+\text{Final Score} = \frac{100}{\text{Robust MSE} + \alpha \cdot L_{seq} + 1}
+$$
+
+(where $\lambda$ is a penalty for undefined regions/NaNs, and $\alpha$ is a length penalty for the sequence of tokens).
 
 
 ## 📊 Dataset & Generation Pipeline
