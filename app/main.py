@@ -1,5 +1,7 @@
+import asyncio
 import base64
 import io
+import multiprocessing
 import os
 from contextlib import asynccontextmanager
 
@@ -168,19 +170,61 @@ async def get_index(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
 
 
+def _eval_worker(formula_str, mode, return_dict):
+    """Изолированный рабочий процесс для опасных вычислений SymPy"""
+    try:
+        if mode == "render":
+            x_dense = np.linspace(-10, 10, 500)
+            formula_str_clean = (
+                formula_str.replace("^", "**").replace("np.", "").replace("math.", "")
+            )
+            t = standard_transformations + (implicit_multiplication_application,)
+            expr = parse_expr(formula_str_clean, transformations=t)
+            y_dense = evaluate_expr_to_points(expr, x_dense)
+            return_dict["result"] = (x_dense.tolist(), y_dense)
+
+        elif mode == "ideal":
+            x, y, mask = get_ideal_math(formula_str)
+            return_dict["result"] = (x, y, mask)
+    except Exception as e:
+        return_dict["error"] = str(e)
+
+
+async def safe_eval_math(formula_str, mode="render", timeout=2.0):
+
+    loop = asyncio.get_running_loop()
+
+    def _run_process():
+        manager = multiprocessing.Manager()
+        return_dict = manager.dict()
+        p = multiprocessing.Process(
+            target=_eval_worker, args=(formula_str, mode, return_dict)
+        )
+        p.start()
+        p.join(timeout)
+
+        if p.is_alive():
+            p.terminate()
+            p.join()
+            return {"error": f"Таймаут: слишком сложная формула: {formula_str}"}
+
+        if "error" in return_dict:
+            return {"error": return_dict["error"]}
+
+        return {"result": return_dict.get("result", (None, None, None))}
+
+    return await loop.run_in_executor(None, _run_process)
+
+
 @app.post("/render_formula")
 async def render_formula(req: FormulaRequest):
-    x_dense = np.linspace(-10, 10, 500)
-    try:
-        formula_str = (
-            req.formula.replace("^", "**").replace("np.", "").replace("math.", "")
-        )
-        t = standard_transformations + (implicit_multiplication_application,)
-        expr = parse_expr(formula_str, transformations=t)
-        y_dense = evaluate_expr_to_points(expr, x_dense)
-        return {"x": x_dense.tolist(), "y": y_dense}
-    except Exception:
+    res = await safe_eval_math(req.formula, mode="render", timeout=2.0)
+
+    if "error" in res:
         return {"x": [], "y": []}
+
+    x_dense, y_dense = res["result"]  # type: ignore
+    return {"x": x_dense, "y": y_dense}
 
 
 @app.post("/predict")
@@ -195,7 +239,12 @@ async def predict(data: PredictRequest):
     else:
         if not data.formula:
             return {"error": "Введите формулу."}
-        x_math, y_math, mask = get_ideal_math(data.formula)
+
+        res = await safe_eval_math(data.formula, mode="ideal", timeout=2.0)
+        if "error" in res:
+            return {"error": res["error"]}
+
+        x_math, y_math, mask = res["result"]
 
     if mask is None or not np.any(mask):
         return {"error": "Не удалось распознать математику."}
