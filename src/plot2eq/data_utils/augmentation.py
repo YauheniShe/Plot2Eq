@@ -3,7 +3,7 @@ import torch.nn.functional as F
 
 
 class HandDrawnAugmentation:
-    def __init__(self, max_drift_scale=0.005, max_wobble_scale=0.015, p=0.8):
+    def __init__(self, max_drift_scale=0.05, max_wobble_scale=0.01, p=0.8):
         """
         :param max_drift_scale: Максимальное плавное искажение
         :param max_wobble_scale: Максимальные мелкие неровности
