@@ -4,6 +4,14 @@ import io
 import os
 from contextlib import asynccontextmanager
 
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+cpu_count = os.cpu_count() or 1
+os.environ["TORCH_NUM_THREADS"] = str(cpu_count)
+
+# flake8: noqa: E402
+
 import numpy as np
 import sympy as sp
 import torch
@@ -32,6 +40,9 @@ tokenizer = None
 async def lifespan(app: FastAPI):
     global model, tokenizer
     print("Загрузка модели...")
+    cpu_count = os.cpu_count() or 1
+    torch.set_num_threads(cpu_count)
+
     tokenizer = Tokenizer()
     config = TrainConfig()
     model = Plot2EqModel(
@@ -49,6 +60,7 @@ async def lifespan(app: FastAPI):
         state_dict = torch.load(checkpoint_path, map_location="cpu")
         model.load_state_dict(state_dict.get("model_state_dict", state_dict))
     model.eval()
+    model = torch.compile(model)
     print("Модель готова!")
     yield
 
@@ -205,6 +217,8 @@ async def render_formula(req: FormulaRequest):
 
 @app.post("/predict")
 async def predict(data: PredictRequest):
+    loop = asyncio.get_running_loop()
+
     if data.mode == "draw":
         if not data.image_base64:
             return {"error": "Нет изображения."}
@@ -218,7 +232,6 @@ async def predict(data: PredictRequest):
         if len(data.formula) > 200:
             return {"error": "Формула слишком длинная (максимум 200 символов)."}
 
-        loop = asyncio.get_running_loop()
         try:
             x_math, y_math, mask = await asyncio.wait_for(
                 loop.run_in_executor(None, get_ideal_math, data.formula), timeout=2.0
@@ -235,18 +248,23 @@ async def predict(data: PredictRequest):
     if pts_tensor is None:
         return {"error": "Слишком мало точек."}
 
-    results = predict_top_k_equations(
-        model,
-        pts_tensor,
-        tokenizer,
-        x_data=x_math[mask],  # type: ignore
-        y_data=y_math[mask],  # type: ignore
-        beam_size=data.beam_size,
-        top_k=data.top_k,
-        length_penalty=data.length_penalty,
-        fast_mode=data.fast_mode,
-        opt_max_iter=data.opt_max_iter,
-        opt_popsize=data.opt_popsize,
+    current_beam_size = min(data.beam_size, 2) if data.fast_mode else data.beam_size
+
+    results = await loop.run_in_executor(
+        None,
+        lambda: predict_top_k_equations(
+            model,
+            pts_tensor,
+            tokenizer,
+            x_data=x_math[mask],  # type: ignore
+            y_data=y_math[mask],  # type: ignore
+            beam_size=current_beam_size,
+            top_k=data.top_k,
+            length_penalty=data.length_penalty,
+            fast_mode=data.fast_mode,
+            opt_max_iter=data.opt_max_iter,
+            opt_popsize=data.opt_popsize,
+        ),
     )
 
     dense_x = np.linspace(-10, 10, 500)
