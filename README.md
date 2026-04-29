@@ -107,7 +107,7 @@ Access the app at `http://localhost:7860`.
 
 The model was trained using `PyTorch 2.x` (`torch.compile`, `bfloat16` autocast) and tracked via **Weights & Biases (W&B)**.
 * **Token Accuracy:** **> 95%**
-* **Sequence Accuracy:~63%** *(This is an exact, full-string match of the mathematical skeleton!)*
+* **Sequence Accuracy: ~63%** *(This is an exact, full-string match of the mathematical skeleton!)*
 * **Loss:** CrossEntropy with label smoothing and Cosine Annealing learning rate schedule.
 
 <p align="center">
