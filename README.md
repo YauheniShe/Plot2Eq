@@ -43,9 +43,13 @@ To solve this, the project uses a highly effective **Two-Stage Pipeline**:
 2. **⚙️ Mathematical Optimization & Candidate Ranking:**
    A global optimization algorithm (`scipy.optimize.differential_evolution`) fits the constants to the user's drawn points. To handle asymptotes robustly and penalize overly complex expressions (Occam's razor), the candidates from Beam Search are ranked using a custom scoring function:
 
-   $$ \text{Robust MSE} = \frac{1}{N_{valid}} \sum (\hat{y}_i - y_i)^2 + \lambda \left( \frac{N_{total} - N_{valid}}{N_{total}} \right) $$
+   $$
+    \text{Robust MSE} = \frac{1}{N_{valid}} \sum (\hat{y}_i - y_i)^2 + \lambda \left( \frac{N_{total} - N_{valid}}{N_{total}} \right)
+   $$
    
-   $$ \text{Final Score} =  \frac{100}{\text{Robust MSE} + \alpha \cdot L_{seq} + 1} $$
+   $$
+   \text{Final Score} =  \frac{100}{\text{Robust MSE} + \alpha \cdot L_{seq} + 1}
+   $$
 
    *(where $\lambda$ is a penalty for undefined regions/NaNs, and $\alpha$ is a length penalty for the sequence of tokens).*
 
@@ -104,7 +108,7 @@ Access the app at `http://localhost:7860`.
 
 The model was trained using `PyTorch 2.x` (`torch.compile`, `bfloat16` autocast) and tracked via **Weights & Biases (W&B)**.
 * **Token Accuracy:** **> 95%**
-* **Sequence Accuracy:** **~ 50-60%** *(This is an exact, full-string match of the mathematical skeleton!)*
+* **Sequence Accuracy:** **~ 63%** *(This is an exact, full-string match of the mathematical skeleton!)*
 * **Loss:** CrossEntropy with label smoothing and Cosine Annealing learning rate schedule.
 
 <p align="center">
@@ -118,16 +122,17 @@ The model was trained using `PyTorch 2.x` (`torch.compile`, `bfloat16` autocast)
 ├── app/                  # FastAPI backend and Jinja2 UI templates
 ├── checkpoints/          # Saved model weights (.pth)
 ├── data/                 # Raw and compiled dataset chunks
-├── src/plot2eq/          # Core ML package
+├── notebooks/            # Research & Development
+├── scripts/              # Standalone CLI tools for dataset building
+├── src/plot2eq/          # Core ML package (The "Engine")
 │   ├── core/             # Tokenizer, AST Generation, SymPy logic
-│   ├── data_prep/        # Data Generation, Normalization, GPU Collisions removal
-│   ├── data_utils/       # PyTorch Datasets, Dataloaders, Hand-drawn Augmentations
-│   ├── inference/        # Beam Search, SciPy Differential Evolution logic
-│   ├── models/           # Point-to-Sequence (ConvNeXt1D + Transformer + RoPE)
-│   └── training/         # PyTorch training loop and W&B loggers
-├── scripts/              # Build & Filter dataset scripts
-├── pyproject.toml        # Project dependencies
-└── Dockerfile            # Container configuration
+│   ├── data_prep/        # Normalization & GPU Collision removal
+│   ├── data_utils/       # PyTorch Datasets & Dataloaders
+│   ├── inference/        # Beam Search & SciPy Differential Evolution
+│   ├── models/           # Architecture (ConvNeXt1D + Transformer + RoPE)
+│   └── training/         # Trainer logic & W&B logging
+├── pyproject.toml        # Project metadata and dependencies
+└── Dockerfile            # Production-ready container config
 ```
 
 ## 🛠 Inference API Usage
