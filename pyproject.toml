@@ -12,7 +12,13 @@ dependencies = [
     "tqdm",
     "sympy",
     "matplotlib",
-    "torch"
+    "torch",
+    "fastapi",
+    "uvicorn[standard]",
+    "jinja2",
+    "pydantic",
+    "pillow",
+    "python-multipart"
 ]
 
 [tool.setuptools.packages.find]
