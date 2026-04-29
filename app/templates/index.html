@@ -53,7 +53,6 @@
             display: block;
         }
 
-        /* Ограничиваем скролл результатов только на десктопе, на мобилке - скроллим всю страницу */
         @media (min-width: 1024px) {
             .results-scroll {
                 max-height: calc(100vh - 200px);
@@ -72,26 +71,63 @@
 
     <div class="max-w-[1600px] mx-auto px-4 grid grid-cols-1 xl:grid-cols-12 gap-6 pb-12">
 
-        <div class="xl:col-span-2 space-y-4 order-2 xl:order-1">
+        <!-- Боковая панель с настройками -->
+        <div class="xl:col-span-3 space-y-4 order-2 xl:order-1">
             <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
-                <h3 class="text-lg font-bold mb-4">Настройки</h3>
-                <div class="mb-6">
-                    <label class="block text-sm text-gray-700 mb-2">
-                        Beam Search: <span id="beamVal" class="text-blue-600 font-bold">7</span>
-                    </label>
-                    <input type="range" id="beamSize" min="1" max="15" value="7" class="w-full">
+                <h3 class="text-lg font-bold mb-4">ML Настройки</h3>
+
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm text-gray-700 mb-1">
+                            Beam Search: <span id="beamVal" class="text-blue-600 font-bold">7</span>
+                        </label>
+                        <input type="range" id="beamSize" min="1" max="15" value="7" class="w-full">
+                    </div>
+                    <div>
+                        <label class="block text-sm text-gray-700 mb-1">
+                            Top-K: <span id="topVal" class="text-blue-600 font-bold">3</span>
+                        </label>
+                        <input type="range" id="topK" min="1" max="5" value="3" class="w-full">
+                    </div>
+                    <div>
+                        <label class="block text-sm text-gray-700 mb-1">
+                            Штраф за длину (Occam's): <span id="lenPenVal" class="text-blue-600 font-bold">0.01</span>
+                        </label>
+                        <input type="range" id="lengthPenalty" min="0" max="0.2" step="0.01" value="0.01"
+                            class="w-full">
+                    </div>
                 </div>
-                <div>
-                    <label class="block text-sm text-gray-700 mb-2">
-                        Top-K: <span id="topVal" class="text-blue-600 font-bold">3</span>
+
+                <div class="mt-6 pt-4 border-t border-gray-200">
+                    <h3 class="text-sm font-bold mb-3 text-gray-800">Оптимизация констант (SciPy)</h3>
+
+                    <label
+                        class="flex items-center space-x-2 cursor-pointer mb-4 p-2 bg-yellow-50 rounded-lg border border-yellow-200 hover:bg-yellow-100 transition">
+                        <input type="checkbox" id="fastMode"
+                            class="form-checkbox h-5 w-5 text-yellow-600 rounded cursor-pointer">
+                        <span class="text-sm font-bold text-yellow-800">⚡ Быстрый режим</span>
                     </label>
-                    <input type="range" id="topK" min="1" max="5" value="3" class="w-full">
+
+                    <div id="advOptSettings" class="space-y-4 transition-opacity duration-200">
+                        <div>
+                            <label class="block text-sm text-gray-700 mb-1">
+                                Max Итераций: <span id="iterVal" class="text-blue-600 font-bold">200</span>
+                            </label>
+                            <input type="range" id="maxIter" min="10" max="500" step="10" value="200" class="w-full">
+                        </div>
+                        <div>
+                            <label class="block text-sm text-gray-700 mb-1">
+                                Размер популяции: <span id="popVal" class="text-blue-600 font-bold">15</span>
+                            </label>
+                            <input type="range" id="popSize" min="2" max="50" step="1" value="15" class="w-full">
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
 
         <div
-            class="xl:col-span-10 order-1 xl:order-2 bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden flex flex-col">
+            class="xl:col-span-9 order-1 xl:order-2 bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden flex flex-col">
 
             <div class="flex border-b border-gray-200 bg-gray-50 px-4 md:px-8">
                 <button
@@ -106,7 +142,7 @@
                 </button>
             </div>
 
-            <div class="p-4 md:p-8 grid grid-cols-1 lg:grid-cols-2 gap-8 flex-1">
+            <div class="p-4 md:p-8 grid grid-cols-1 xl:grid-cols-2 gap-8 flex-1">
 
                 <div class="flex flex-col">
 
@@ -149,7 +185,7 @@
                     </div>
                 </div>
 
-                <div class="flex flex-col border-t lg:border-t-0 lg:border-l border-gray-100 lg:pl-8 pt-8 lg:pt-0">
+                <div class="flex flex-col border-t xl:border-t-0 xl:border-l border-gray-100 xl:pl-8 pt-8 xl:pt-0">
                     <h2 class="text-xl font-bold mb-6">Результаты модели</h2>
                     <div id="results" class="results-scroll space-y-6 pb-8">
                         <div
@@ -164,10 +200,30 @@
     </div>
 
     <script>
+
         const beamSize = document.getElementById('beamSize');
         const topK = document.getElementById('topK');
+        const lengthPenalty = document.getElementById('lengthPenalty');
+        const fastMode = document.getElementById('fastMode');
+        const maxIter = document.getElementById('maxIter');
+        const popSize = document.getElementById('popSize');
+        const advOptSettings = document.getElementById('advOptSettings');
+
         beamSize.addEventListener('input', (e) => document.getElementById('beamVal').innerText = e.target.value);
         topK.addEventListener('input', (e) => document.getElementById('topVal').innerText = e.target.value);
+        lengthPenalty.addEventListener('input', (e) => document.getElementById('lenPenVal').innerText = e.target.value);
+        maxIter.addEventListener('input', (e) => document.getElementById('iterVal').innerText = e.target.value);
+        popSize.addEventListener('input', (e) => document.getElementById('popVal').innerText = e.target.value);
+
+
+        fastMode.addEventListener('change', (e) => {
+            if (e.target.checked) {
+                advOptSettings.classList.add('opacity-40', 'pointer-events-none');
+            } else {
+                advOptSettings.classList.remove('opacity-40', 'pointer-events-none');
+            }
+        });
+
 
         let currentMode = 'draw';
         document.querySelectorAll('.tab-btn').forEach(btn => {
@@ -181,6 +237,7 @@
                 currentMode = targetId === 'tab-draw' ? 'draw' : 'formula';
             });
         });
+
 
         function drawGrid(ctx, w, h) {
             ctx.clearRect(0, 0, w, h);
@@ -337,7 +394,16 @@
             const resultsDiv = document.getElementById('results');
             resultsDiv.innerHTML = `<div class="bg-blue-50 p-6 rounded-xl border border-blue-200 text-blue-600 font-bold text-center animate-pulse">⏳ Нейросеть думает...</div>`;
 
-            const payload = { mode: currentMode, beam_size: parseInt(beamSize.value), top_k: parseInt(topK.value) };
+            const payload = {
+                mode: currentMode,
+                beam_size: parseInt(beamSize.value),
+                top_k: parseInt(topK.value),
+                length_penalty: parseFloat(lengthPenalty.value),
+                fast_mode: fastMode.checked,
+                opt_max_iter: parseInt(maxIter.value),
+                opt_popsize: parseInt(popSize.value)
+            };
+
             if (currentMode === 'draw') payload.image_base64 = drawCanvas.toDataURL('image/png');
             else payload.formula = formulaInput.value;
 
@@ -346,7 +412,7 @@
                 const data = await response.json();
 
                 if (!response.ok && data.detail) {
-                    resultsDiv.innerHTML = `<div class="bg-red-50 p-4 border border-red-200 text-red-600 rounded-lg"><b>Ошибка валидации:</b> Недопустимые значения параметров. Антон хватит ломать бекенд! 😡👊</div>`;
+                    resultsDiv.innerHTML = `<div class="bg-red-50 p-4 border border-red-200 text-red-600 rounded-lg"><b>Ошибка валидации:</b> Недопустимые значения параметров. Не пытайтесь сломать бекенд! 🕵️‍♂️</div>`;
                     return;
                 }
 
@@ -363,7 +429,10 @@
                         <div class="bg-white rounded-xl shadow border border-gray-200 overflow-hidden">
                             <div class="bg-gray-50 border-b border-gray-200 p-4 flex justify-between items-center">
                                 <span class="bg-blue-100 text-blue-800 text-sm font-bold px-3 py-1 rounded">Кандидат #${idx + 1}</span>
-                                <span class="text-sm text-gray-500">MSE: <b>${res.mse.toFixed(4)}</b></span>
+                                <div class="text-right">
+                                    <span class="text-sm text-gray-500 block">MSE: <b>${res.mse.toFixed(4)}</b></span>
+                                    <span class="text-xs text-gray-400 block">Score: ${res.score.toFixed(4)}</span>
+                                </div>
                             </div>
                             <div class="p-6 text-center">
                                 <div class="relative group text-xl md:text-2xl overflow-x-auto py-4 mb-4 text-center rounded-lg hover:bg-gray-50 transition">

@@ -61,10 +61,13 @@ class PredictRequest(BaseModel):
     mode: str
     image_base64: str = None  # type: ignore
     formula: str = None  # type: ignore
-    beam_size: int = 5
-    top_k: int = 3
     beam_size: int = Field(default=5, ge=1, le=15, description="Beam size for search")
     top_k: int = Field(default=3, ge=1, le=5, description="Top K results to return")
+
+    length_penalty: float = Field(default=0.01, ge=0.0, le=1.0)
+    fast_mode: bool = Field(default=False)
+    opt_max_iter: int = Field(default=200, ge=10, le=1000)
+    opt_popsize: int = Field(default=15, ge=2, le=50)
 
 
 class FormulaRequest(BaseModel):
@@ -240,6 +243,10 @@ async def predict(data: PredictRequest):
         y_data=y_math[mask],  # type: ignore
         beam_size=data.beam_size,
         top_k=data.top_k,
+        length_penalty=data.length_penalty,
+        fast_mode=data.fast_mode,
+        opt_max_iter=data.opt_max_iter,
+        opt_popsize=data.opt_popsize,
     )
 
     dense_x = np.linspace(-10, 10, 500)
@@ -251,6 +258,7 @@ async def predict(data: PredictRequest):
                 "latex": sp.latex(res["best_expr"]),
                 "skeleton": res["skeleton"],
                 "mse": float(res["mse"]),
+                "score": float(res["score"]),
                 "pred_y": evaluate_expr_to_points(res["best_expr"], dense_x),
             }
         )
