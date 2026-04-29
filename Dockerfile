@@ -1,19 +1,26 @@
-FROM python:3.11-slim
+FROM python:3.10-slim
 
-ENV PYTHONUNBUFFERED=1
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc libgl1 libglib2.0-0 && rm -rf /var/lib/apt/lists/*
 
-ENV PYTHONDONTWRITEBYTECODE=1
+RUN useradd -m -u 1000 user
+USER user
+ENV PATH="/home/user/.local/bin:$PATH"
 
-WORKDIR /app
+WORKDIR /code
 
-RUN pip install --no-cache-dir --upgrade pip
+RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
 
-COPY pyproject.toml ./
+COPY --chown=user pyproject.toml ./
 
-COPY . .
+COPY --chown=user src/ src/
+COPY --chown=user app/ app/
+COPY --chown=user checkpoints/ checkpoints/
 
 RUN pip install --no-cache-dir .
 
-RUN mkdir -p /app/data
+WORKDIR /code/app
 
-CMD ["python", "scripts/generate_data.py"]
+EXPOSE 7860
+
+CMD["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "7860"]
