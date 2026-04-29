@@ -75,7 +75,8 @@ def fit_constants(points_tensor, expr, bounds_range=(-10.0, 10.0), max_iter=200)
         try:
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
-                preds = f_expr(x_data)
+                with np.errstate(all="ignore"):
+                    preds = f_expr(x_data)
                 mse = calculate_robust_mse(preds, y_data)
 
             return parameterized_expr, [], (mse if mse < 1e8 else float("inf"))
@@ -89,7 +90,8 @@ def fit_constants(points_tensor, expr, bounds_range=(-10.0, 10.0), max_iter=200)
         try:
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
-                preds = f_expr(x_data, *p)
+                with np.errstate(all="ignore"):
+                    preds = f_expr(x_data, *p)
                 return calculate_robust_mse(preds, y_data)
 
         except Exception:
