@@ -45,7 +45,7 @@ def create_val_predictions_table(model, points, true_tokens, tokenizer, num_exam
         else:
             pred_expr = None
             mse = float("inf")
-            score = float("inf")
+            score = 0.0
 
         fig, ax = plt.subplots(figsize=(5, 4))
         ax.plot(x_data_fit, y_data_fit, color="black", linewidth=3, label="Target")

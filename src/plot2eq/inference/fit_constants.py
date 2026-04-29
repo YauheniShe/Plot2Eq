@@ -2,7 +2,7 @@ import warnings
 
 import numpy as np
 import sympy as sp
-from scipy.optimize import differential_evolution
+from scipy.optimize import curve_fit, differential_evolution
 
 
 def assign_unique_constants(expr):
@@ -55,6 +55,53 @@ def calculate_robust_mse(preds, y_data):
     return mse + penalty
 
 
+def fit_constants_fast(expr, x_data, y_data):
+    """Быстрый подбор констант с помощью curve_fit."""
+    parameterized_expr, params = assign_unique_constants(expr)
+    x_sym = sp.Symbol("x", real=True)
+
+    if not params:
+        f_expr = sp.lambdify(x_sym, parameterized_expr, modules=["numpy"])
+        try:
+            preds = f_expr(x_data)
+            mse = calculate_robust_mse(preds, y_data)
+            return parameterized_expr, [], (mse if mse < 1e8 else float("inf"))
+        except Exception:
+            return parameterized_expr, [], float("inf")
+
+    try:
+        f_lambdified = sp.lambdify(
+            (x_sym, *params), parameterized_expr, modules="numpy"
+        )
+
+        initial_guesses = np.ones(len(params))
+        bounds = ([-10.0] * len(params), [10.0] * len(params))
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+
+            popt, _ = curve_fit(
+                f_lambdified,
+                x_data,
+                y_data,
+                p0=initial_guesses,
+                bounds=bounds,
+                method="trf",
+                maxfev=2000,
+            )
+
+        preds = f_lambdified(x_data, *popt)
+        best_mse = calculate_robust_mse(preds, y_data)
+
+        subs_dict = {p: round(val, 3) for p, val in zip(params, popt)}
+        final_expr = parameterized_expr.subs(subs_dict)
+
+        return final_expr, popt, best_mse
+
+    except Exception:
+        return parameterized_expr, [], float("inf")
+
+
 def fit_constants(
     expr,
     x_data,
@@ -68,6 +115,9 @@ def fit_constants(
     Принимает sympy выражение и сырые массивы (без NaN и масок).
     Возвращает формулу с подобранными константами, сами константы и MSE.
     """
+    if fast_mode:
+        return fit_constants_fast(expr, x_data, y_data)
+
     parameterized_expr, params = assign_unique_constants(expr)
     x_sym = sp.Symbol("x", real=True)
 
@@ -98,15 +148,6 @@ def fit_constants(
 
     bounds = [bounds_range for _ in params]
 
-    if fast_mode:
-        max_iter = min(max_iter, 50)
-        popsize = min(popsize, 5)
-        polish = False
-        tol = 1e-3
-    else:
-        polish = True
-        tol = 1e-5
-
     try:
         result = differential_evolution(
             objective_func,
@@ -116,8 +157,8 @@ def fit_constants(
             popsize=popsize,
             mutation=(0.5, 1.0),
             recombination=0.7,
-            tol=tol,
-            polish=polish,
+            tol=1e-5,
+            polish=True,
         )
 
         if not result.success and result.fun >= 1e8:
