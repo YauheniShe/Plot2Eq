@@ -30,7 +30,6 @@ def assign_unique_constants(expr):
 
 
 def calculate_robust_mse(preds, y_data):
-
     if np.isscalar(preds):
         preds = np.full_like(y_data, preds, dtype=float)
 
@@ -56,19 +55,13 @@ def calculate_robust_mse(preds, y_data):
     return mse + penalty
 
 
-def fit_constants(points_tensor, expr, bounds_range=(-10.0, 10.0), max_iter=200):
+def fit_constants(expr, x_data, y_data, bounds_range=(-10.0, 10.0), max_iter=200):
+    """
+    Принимает sympy выражение и сырые массивы (без NaN и масок).
+    Возвращает формулу с подобранными константами, сами константы и MSE.
+    """
     parameterized_expr, params = assign_unique_constants(expr)
     x_sym = sp.Symbol("x", real=True)
-
-    if points_tensor.dim() == 3:
-        points_tensor = points_tensor.squeeze(0)
-
-    y_vals = points_tensor[0].cpu().numpy()
-    mask = points_tensor[1].cpu().numpy().astype(bool)
-    x_vals = np.linspace(0, 1, len(y_vals))
-
-    x_data = x_vals[mask]
-    y_data = y_vals[mask]
 
     if len(params) == 0:
         f_expr = sp.lambdify(x_sym, parameterized_expr, modules=["numpy"])
@@ -78,7 +71,6 @@ def fit_constants(points_tensor, expr, bounds_range=(-10.0, 10.0), max_iter=200)
                 with np.errstate(all="ignore"):
                     preds = f_expr(x_data)
                 mse = calculate_robust_mse(preds, y_data)
-
             return parameterized_expr, [], (mse if mse < 1e8 else float("inf"))
 
         except Exception:
@@ -93,7 +85,6 @@ def fit_constants(points_tensor, expr, bounds_range=(-10.0, 10.0), max_iter=200)
                 with np.errstate(all="ignore"):
                     preds = f_expr(x_data, *p)
                 return calculate_robust_mse(preds, y_data)
-
         except Exception:
             return 1e9
 
