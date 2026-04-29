@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import io
 import os
@@ -168,17 +169,31 @@ async def get_index(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
 
 
+def _render_worker(formula_str):
+    """Синхронный парсинг для запуска в пуле потоков"""
+    x_dense = np.linspace(-10, 10, 500)
+    formula_str_clean = (
+        formula_str.replace("^", "**").replace("np.", "").replace("math.", "")
+    )
+    t = standard_transformations + (implicit_multiplication_application,)
+    expr = parse_expr(formula_str_clean, transformations=t)
+    y_dense = evaluate_expr_to_points(expr, x_dense)
+    return x_dense.tolist(), y_dense
+
+
 @app.post("/render_formula")
 async def render_formula(req: FormulaRequest):
-    x_dense = np.linspace(-10, 10, 500)
+    if len(req.formula) > 200:
+        return {"x": [], "y": []}
+
+    loop = asyncio.get_running_loop()
     try:
-        formula_str = (
-            req.formula.replace("^", "**").replace("np.", "").replace("math.", "")
+        x_dense, y_dense = await asyncio.wait_for(
+            loop.run_in_executor(None, _render_worker, req.formula), timeout=10.0
         )
-        t = standard_transformations + (implicit_multiplication_application,)
-        expr = parse_expr(formula_str, transformations=t)
-        y_dense = evaluate_expr_to_points(expr, x_dense)
-        return {"x": x_dense.tolist(), "y": y_dense}
+        return {"x": x_dense, "y": y_dense}
+    except asyncio.TimeoutError:
+        return {"x": [], "y": []}
     except Exception:
         return {"x": [], "y": []}
 
@@ -195,7 +210,18 @@ async def predict(data: PredictRequest):
     else:
         if not data.formula:
             return {"error": "Введите формулу."}
-        x_math, y_math, mask = get_ideal_math(data.formula)
+        if len(data.formula) > 200:
+            return {"error": "Формула слишком длинная (максимум 200 символов)."}
+
+        loop = asyncio.get_running_loop()
+        try:
+            x_math, y_math, mask = await asyncio.wait_for(
+                loop.run_in_executor(None, get_ideal_math, data.formula), timeout=2.0
+            )
+        except asyncio.TimeoutError:
+            return {"error": "Таймаут: слишком сложная формула для вычисления."}
+        except Exception as e:
+            return {"error": f"Ошибка в формуле: {str(e)}"}
 
     if mask is None or not np.any(mask):
         return {"error": "Не удалось распознать математику."}
