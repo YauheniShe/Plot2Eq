@@ -91,7 +91,8 @@
                     </div>
                     <div>
                         <label class="block text-sm text-gray-700 mb-1">
-                            Штраф за длину (Occam's): <span id="lenPenVal" class="text-blue-600 font-bold">0.01</span>
+                            Коэффициент штрафа за длину: <span id="lenPenVal"
+                                class="text-blue-600 font-bold">0.01</span>
                         </label>
                         <input type="range" id="lengthPenalty" min="0" max="0.2" step="0.01" value="0.01"
                             class="w-full">
@@ -105,7 +106,10 @@
                         class="flex items-center space-x-2 cursor-pointer mb-4 p-2 bg-yellow-50 rounded-lg border border-yellow-200 hover:bg-yellow-100 transition">
                         <input type="checkbox" id="fastMode"
                             class="form-checkbox h-5 w-5 text-yellow-600 rounded cursor-pointer">
-                        <span class="text-sm font-bold text-yellow-800">⚡ Быстрый режим</span>
+                        <span class="text-sm font-bold text-yellow-800">Быстрый режим</span>
+                        <span
+                            title="Использует быстрый, но менее точный локальный оптимизатор (curve_fit) вместо глобального (differential_evolution)."
+                            class="text-gray-400 cursor-help">(?)</span>
                     </label>
 
                     <div id="advOptSettings" class="space-y-4 transition-opacity duration-200">
@@ -113,13 +117,13 @@
                             <label class="block text-sm text-gray-700 mb-1">
                                 Max Итераций: <span id="iterVal" class="text-blue-600 font-bold">200</span>
                             </label>
-                            <input type="range" id="maxIter" min="10" max="500" step="10" value="200" class="w-full">
+                            <input type="range" id="maxIter" min="10" max="300" step="10" value="200" class="w-full">
                         </div>
                         <div>
                             <label class="block text-sm text-gray-700 mb-1">
                                 Размер популяции: <span id="popVal" class="text-blue-600 font-bold">15</span>
                             </label>
-                            <input type="range" id="popSize" min="2" max="50" step="1" value="15" class="w-full">
+                            <input type="range" id="popSize" min="2" max="30" step="1" value="15" class="w-full">
                         </div>
                     </div>
                 </div>
