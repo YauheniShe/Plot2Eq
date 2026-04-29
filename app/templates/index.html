@@ -3,6 +3,7 @@
 
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Plot2Eq 📈</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
@@ -28,6 +29,10 @@
             cursor: crosshair;
         }
 
+        #drawCanvas {
+            touch-action: none;
+        }
+
         .tab-btn {
             border-bottom-width: 3px;
             border-color: transparent;
@@ -48,10 +53,13 @@
             display: block;
         }
 
-        .results-scroll {
-            max-height: calc(100vh - 200px);
-            overflow-y: auto;
-            padding-right: 8px;
+        /* Ограничиваем скролл результатов только на десктопе, на мобилке - скроллим всю страницу */
+        @media (min-width: 1024px) {
+            .results-scroll {
+                max-height: calc(100vh - 200px);
+                overflow-y: auto;
+                padding-right: 8px;
+            }
         }
     </style>
 </head>
@@ -118,7 +126,7 @@
 
                     <div id="tab-formula" class="tab-content flex-1">
                         <input type="text" id="formulaInput" value="x + sin((x / 1.5)^2)"
-                            class="w-full max-w-[600px] mx-auto block text-lg p-4 border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-blue-500 outline-none font-mono transition mb-4"
+                            class="w-full max-w-[600px] mx-auto block text-base sm:text-lg p-4 border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-blue-500 outline-none font-mono transition mb-4"
                             placeholder="Например: sin(x) * 5">
 
                         <div class="canvas-wrapper mb-4 relative">
@@ -235,11 +243,15 @@
         const dCtx = drawCanvas.getContext('2d');
         dCtx.strokeStyle = '#000000'; dCtx.lineWidth = 4; dCtx.lineCap = 'round'; dCtx.lineJoin = 'round';
 
-        function getMousePos(e) {
+
+        function getEventPos(e) {
             const rect = drawCanvas.getBoundingClientRect();
+            const clientX = e.touches && e.touches.length > 0 ? e.touches[0].clientX : e.clientX;
+            const clientY = e.touches && e.touches.length > 0 ? e.touches[0].clientY : e.clientY;
+
             return {
-                x: (e.clientX - rect.left) * (drawCanvas.width / rect.width),
-                y: (e.clientY - rect.top) * (drawCanvas.height / rect.height)
+                x: (clientX - rect.left) * (drawCanvas.width / rect.width),
+                y: (clientY - rect.top) * (drawCanvas.height / rect.height)
             };
         }
 
@@ -247,21 +259,23 @@
         let lastPos = { x: 0, y: 0 };
         let prevPos = { x: 0, y: 0 };
 
-        drawCanvas.addEventListener('mousedown', (e) => {
+        function startDrawing(e) {
+            if (e.type.includes('touch')) e.preventDefault();
             isDrawing = true;
-            lastPos = getMousePos(e);
+            lastPos = getEventPos(e);
             prevPos = lastPos;
 
             dCtx.beginPath();
             dCtx.arc(lastPos.x, lastPos.y, dCtx.lineWidth / 2, 0, Math.PI * 2);
             dCtx.fillStyle = dCtx.strokeStyle;
             dCtx.fill();
-        });
+        }
 
-        drawCanvas.addEventListener('mousemove', (e) => {
+        function draw(e) {
             if (!isDrawing) return;
-            const currentPos = getMousePos(e);
+            if (e.type.includes('touch')) e.preventDefault();
 
+            const currentPos = getEventPos(e);
             const midPoint = {
                 x: (lastPos.x + currentPos.x) / 2,
                 y: (lastPos.y + currentPos.y) / 2
@@ -274,10 +288,21 @@
 
             prevPos = midPoint;
             lastPos = currentPos;
-        });
+        }
 
-        drawCanvas.addEventListener('mouseup', () => isDrawing = false);
-        drawCanvas.addEventListener('mouseout', () => isDrawing = false);
+        function stopDrawing(e) {
+            isDrawing = false;
+        }
+
+        drawCanvas.addEventListener('mousedown', startDrawing);
+        drawCanvas.addEventListener('mousemove', draw);
+        drawCanvas.addEventListener('mouseup', stopDrawing);
+        drawCanvas.addEventListener('mouseout', stopDrawing);
+
+        drawCanvas.addEventListener('touchstart', startDrawing, { passive: false });
+        drawCanvas.addEventListener('touchmove', draw, { passive: false });
+        drawCanvas.addEventListener('touchend', stopDrawing);
+        drawCanvas.addEventListener('touchcancel', stopDrawing);
 
         document.getElementById('clearBtn').addEventListener('click', () => { dCtx.clearRect(0, 0, w, h); });
 
@@ -336,11 +361,11 @@
                                 <span class="text-sm text-gray-500">MSE: <b>${res.mse.toFixed(4)}</b></span>
                             </div>
                             <div class="p-6 text-center">
-                                <div class="relative group text-2xl overflow-x-auto py-4 mb-4 text-center rounded-lg hover:bg-gray-50 transition">
+                                <div class="relative group text-xl md:text-2xl overflow-x-auto py-4 mb-4 text-center rounded-lg hover:bg-gray-50 transition">
                                     \\[ y = ${res.latex} \\]
                                     <button onclick="copyLatex('${res.latex.replace(/\\/g, '\\\\')}', this)" 
-                                            class="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition shadow-sm border border-gray-200 bg-white hover:bg-gray-100 text-gray-600 text-xs px-3 py-1.5 rounded-md flex items-center gap-1 cursor-pointer">
-                                        📋 Копировать
+                                            class="absolute top-2 right-2 opacity-100 md:opacity-0 group-hover:opacity-100 transition shadow-sm border border-gray-200 bg-white hover:bg-gray-100 text-gray-600 text-xs px-3 py-1.5 rounded-md flex items-center gap-1 cursor-pointer">
+                                        📋 Коп.
                                     </button>
                                 </div>
                                 <div class="flex justify-center mb-4">
