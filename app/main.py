@@ -4,6 +4,10 @@ import io
 import os
 from contextlib import asynccontextmanager
 
+from scipy.signal import savgol_filter
+from skimage.measure import label, regionprops
+from skimage.morphology import skeletonize
+
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["OPENBLAS_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"
@@ -11,7 +15,7 @@ cpu_count = os.cpu_count() or 1
 os.environ["TORCH_NUM_THREADS"] = str(cpu_count)
 
 # flake8: noqa: E402
-
+# 1. Бинаризация по альфа-каналу
 import numpy as np
 import sympy as sp
 import torch
@@ -71,8 +75,8 @@ templates = Jinja2Templates(directory="templates")
 
 class PredictRequest(BaseModel):
     mode: str
-    image_base64: str = None  # type: ignore
-    formula: str = None  # type: ignore
+    image_base64: str | None = None
+    formula: str | None = None
     beam_size: int = Field(default=5, ge=1, le=15, description="Beam size for search")
     top_k: int = Field(default=3, ge=1, le=5, description="Top K results to return")
 
@@ -86,31 +90,131 @@ class FormulaRequest(BaseModel):
     formula: str
 
 
-def process_image_to_math(image: Image.Image, num_points=256):
+def smooth_segments(y, mask, window_length=9, polyorder=3):
+    y_smooth = y.copy()
+    indices = np.where(mask)[0]
+
+    if len(indices) == 0:
+        return y_smooth
+
+    groups = np.split(indices, np.where(np.diff(indices) > 1)[0] + 1)
+
+    for g in groups:
+        n = len(g)
+        if n >= window_length:
+            y_smooth[g] = savgol_filter(y[g], window_length, polyorder)
+        elif n > polyorder:
+            wl = n if n % 2 != 0 else n - 1
+            if wl > polyorder:
+                y_smooth[g] = savgol_filter(y[g], wl, polyorder)
+
+    return y_smooth
+
+
+def process_image_to_math(
+    image: Image.Image, num_points=256, max_vertical_ratio=0.2, max_y_jump_ratio=0.15
+):
+    """
+    Извлекает координаты точек из нарисованного графика.
+
+    :param max_vertical_ratio: Максимальная доля от высоты канваса,
+                               при которой штрих считается прямой вертикальной линией (игнорируется).
+    :param max_y_jump_ratio: Максимально допустимый скачок по Y между двумя соседними
+                             интерполированными X. Если скачок больше - линия разрывается.
+    """
+    image = image.convert("RGBA")
     image_data = np.array(image)
     height, width = image_data.shape[:2]
-    is_drawn = image_data[:, :, 3] > 10
 
-    y_math_raw = np.zeros(width)
-    mask_raw = np.zeros(width, dtype=bool)
+    # Бинаризация и очистка от шума
+    binary_mask = image_data[:, :, 3] > 10
+
+    labels = label(binary_mask)
+    clean_mask = np.zeros_like(binary_mask)
+    min_span = max(width, height) * 0.03
+
+    for region in regionprops(labels):
+        min_row, min_col, max_row, max_col = region.bbox
+        span_y = max_row - min_row
+        span_x = max_col - min_col
+
+        if max(span_x, span_y) >= min_span and region.area >= 10:
+            clean_mask[labels == region.label] = True
+
+    binary_mask = clean_mask
+    skeleton = skeletonize(binary_mask)
+
+    # Сканирование колонок
+    raw_y = np.zeros(width)
+    raw_mask = np.zeros(width, dtype=bool)
+    prev_y_idx = None
+
+    vertical_threshold = height * max_vertical_ratio
 
     for x in range(width):
-        col = is_drawn[:, x]
-        if np.any(col):
-            y_idx = np.average(np.arange(height), weights=col)
-            y_math_raw[x] = 10.0 - 20.0 * (y_idx / height)
-            mask_raw[x] = True
+        col = skeleton[:, x]
+        y_indices = np.where(col)[0]
 
-    x_orig = np.linspace(-10, 10, width)
+        if len(y_indices) == 0 or len(y_indices) > vertical_threshold:
+            prev_y_idx = None
+            continue
+
+        if prev_y_idx is None:
+            best_y_idx = np.mean(y_indices)
+        else:
+            best_y_idx = min(y_indices, key=lambda idx: abs(idx - prev_y_idx))
+
+        math_y_val = 10.0 - 20.0 * (best_y_idx / height)
+
+        raw_y[x] = math_y_val
+        raw_mask[x] = True
+        prev_y_idx = best_y_idx
+
+    # Биннинг до num_points
+    target_y = np.zeros(num_points)
+    target_mask = np.zeros(num_points, dtype=bool)
     x_target = np.linspace(-10, 10, num_points)
 
-    y_math = (
-        np.interp(x_target, x_orig[mask_raw], y_math_raw[mask_raw])
-        if np.any(mask_raw)
-        else np.zeros(num_points)
-    )
-    mask = np.interp(x_target, x_orig, mask_raw.astype(float)) > 0.5
-    return x_target, y_math, mask
+    bin_edges = np.linspace(0, width, num_points + 1)
+
+    for i in range(num_points):
+        start_idx = int(bin_edges[i])
+        end_idx = int(bin_edges[i + 1])
+
+        bin_mask = raw_mask[start_idx:end_idx]
+        if np.any(bin_mask):
+            target_y[i] = np.mean(raw_y[start_idx:end_idx][bin_mask])
+            target_mask[i] = True
+
+    # Разделение на сегменты и фильтрация
+    valid_indices = np.where(target_mask)[0]
+    if len(valid_indices) > 0:
+        y_span = 20.0
+        jump_threshold = y_span * max_y_jump_ratio
+        y_vals = target_y[valid_indices]
+
+        jumps = np.where(np.abs(np.diff(y_vals)) > jump_threshold)[0]
+
+        for j in jumps:
+            target_mask[valid_indices[j]] = False
+
+        valid_indices = np.where(target_mask)[0]
+        # -----------------------------------------------------
+
+        if len(valid_indices) > 0:
+            groups = np.split(
+                valid_indices, np.where(np.diff(valid_indices) > 1)[0] + 1
+            )
+            min_group_len = max(3, int(num_points * 0.02))
+
+            for g in groups:
+                if len(g) < min_group_len:
+                    target_mask[g] = False
+
+    # Сглаживание сегментов
+    target_y = smooth_segments(target_y, target_mask)
+
+    return x_target, target_y, target_mask
 
 
 def get_ideal_math(formula_str, num_points=256):
@@ -222,10 +326,27 @@ async def predict(data: PredictRequest):
     if data.mode == "draw":
         if not data.image_base64:
             return {"error": "Нет изображения."}
-        header, encoded = data.image_base64.split(",", 1)
-        image_bytes = base64.b64decode(encoded)
-        image = Image.open(io.BytesIO(image_bytes)).convert("RGBA")
-        x_math, y_math, mask = process_image_to_math(image)
+        try:
+            if "," in data.image_base64:
+                _, encoded = data.image_base64.split(",", 1)
+            else:
+                encoded = data.image_base64
+            image_bytes = base64.b64decode(encoded)
+            image = Image.open(io.BytesIO(image_bytes)).convert("RGBA")
+        except Exception:
+            return {"error": "Неверный или поврежденный формат изображения."}
+
+        try:
+            x_math, y_math, mask = await asyncio.wait_for(
+                loop.run_in_executor(None, process_image_to_math, image), timeout=5.0
+            )
+        except asyncio.TimeoutError:
+            return {
+                "error": "Таймаут: обработка изображения заняла слишком много времени."
+            }
+        except Exception as e:
+            return {"error": f"Ошибка обработки изображения: {str(e)}"}
+
     else:
         if not data.formula:
             return {"error": "Введите формулу."}
@@ -241,31 +362,34 @@ async def predict(data: PredictRequest):
         except Exception as e:
             return {"error": f"Ошибка в формуле: {str(e)}"}
 
-    if mask is None or not np.any(mask):
+    if mask is None or x_math is None or y_math is None or not np.any(mask):
         return {"error": "Не удалось распознать математику."}
 
     pts_tensor = create_model_tensor(x_math, y_math, mask)
     if pts_tensor is None:
-        return {"error": "Слишком мало точек."}
+        return {"error": "Слишком мало валидных точек на графике."}
 
     current_beam_size = min(data.beam_size, 2) if data.fast_mode else data.beam_size
 
-    results = await loop.run_in_executor(
-        None,
-        lambda: predict_top_k_equations(
-            model,
-            pts_tensor,
-            tokenizer,
-            x_data=x_math[mask],  # type: ignore
-            y_data=y_math[mask],  # type: ignore
-            beam_size=current_beam_size,
-            top_k=data.top_k,
-            length_penalty=data.length_penalty,
-            fast_mode=data.fast_mode,
-            opt_max_iter=data.opt_max_iter,
-            opt_popsize=data.opt_popsize,
-        ),
-    )
+    try:
+        results = await loop.run_in_executor(
+            None,
+            lambda: predict_top_k_equations(
+                model,
+                pts_tensor,
+                tokenizer,
+                x_data=x_math[mask],
+                y_data=y_math[mask],
+                beam_size=current_beam_size,
+                top_k=data.top_k,
+                length_penalty=data.length_penalty,
+                fast_mode=data.fast_mode,
+                opt_max_iter=data.opt_max_iter,
+                opt_popsize=data.opt_popsize,
+            ),
+        )
+    except Exception as e:
+        return {"error": f"Ошибка нейросети при предсказании: {str(e)}"}
 
     dense_x = np.linspace(-10, 10, 500)
     response_data = []
@@ -282,8 +406,8 @@ async def predict(data: PredictRequest):
         )
 
     return {
-        "scatter_x": x_math[mask].tolist(),  # type: ignore
-        "scatter_y": y_math[mask].tolist(),  # type: ignore
+        "scatter_x": x_math[mask].tolist(),
+        "scatter_y": y_math[mask].tolist(),
         "dense_x": dense_x.tolist(),
         "results": response_data,
     }
