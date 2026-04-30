@@ -9,6 +9,7 @@ description = "Symbolic Regression Project"
 dependencies = [
     "numpy",
     "scipy",
+    "scikit-image",
     "tqdm",
     "sympy",
     "matplotlib",
